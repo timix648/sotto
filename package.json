@@ -1,0 +1,12 @@
+{
+  "name": "sotto",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.4"
+  },
+  "scripts": {},
+  "dependencies": {
+    "ethers": "^6.17.0"
+  }
+}

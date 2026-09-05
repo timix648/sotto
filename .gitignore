@@ -1,7 +1,19 @@
 reference/
 node_modules/
+
+# SECRETS - never commit. See docs/MECHANICS.md 4.11
 .env
-.env.local
+.env.*
+!.env.example
+*.key
+*.keys
+keys/
+secrets/
+.wallets.json
+wallets.json
+*-keys.json
+*.pem
+
 *.log
 dist/
 build/
