@@ -8,7 +8,8 @@
   "scripts": {
     "mock": "tsx backend/src/mock/server.ts",
     "build": "hardhat compile",
-    "test": "hardhat test"
+    "test": "hardhat test",
+    "serve": "tsx backend/src/server.ts"
   },
   "dependencies": {
     "@fastify/websocket": "^11.3.0",
