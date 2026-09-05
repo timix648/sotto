@@ -384,7 +384,7 @@ export interface QuoteReveal {
 }
 
 export interface Trade {                 // EIP-712 payload — MUST match Solidity struct
-  rfqId: string;                         // bytes32
+  rfqId: string;                         // bytes32 — see rfqIdToBytes32 below
   assetToken: string;
   partition: string;                     // bytes32
   holdId: string;                        // uint256 as string
@@ -406,6 +406,23 @@ export interface AuditEvent {
   hcsSequenceNumber: number;
   consensusTimestamp: string;
   topicId: string;
+}
+```
+
+**`Rfq.id` is a UUID string; `Trade.rfqId` is `bytes32`. The conversion is fixed and reversible:**
+
+```ts
+// A UUID is 128 bits; bytes32 is 256. It fits with room to spare, so do NOT hash it.
+// Right-padding keeps it reversible: anyone reading a Settled event on HashScan
+// can recover the RFQ id without access to our database. Auditability is the
+// whole point of this project — do not throw it away for a keccak.
+export function rfqIdToBytes32(uuid: string): `0x${string}` {
+  return ('0x' + uuid.replace(/-/g, '') + '0'.repeat(32)) as `0x${string}`;
+}
+
+export function bytes32ToRfqId(b: string): string {
+  const h = b.slice(2, 34);
+  return [h.slice(0,8), h.slice(8,12), h.slice(12,16), h.slice(16,20), h.slice(20,32)].join('-');
 }
 ```
 
@@ -518,21 +535,43 @@ function settle(Trade calldata t, bytes calldata sellerSig, bytes calldata buyer
 function deliver(Trade calldata t, bytes calldata sellerSig, bytes calldata buyerSig)
     external onlyRole(RELAYER_ROLE) returns (bool);
 
-function releaseExpired(address assetToken, bytes32 partition, address holder, uint256 holdId)
-    external;   // escrow-side release when RFQ dies before expiry
+// Escrow-side release when an RFQ dies BEFORE the hold expires, so the seller
+// does not sit through a 48-hour timeout. Escrow-authorised only.
+function releaseHold(address assetToken, bytes32 partition, address holder, uint256 holdId, uint256 amount)
+    external;
 
 function nonces(address account) external view returns (uint256);
 ```
 
+**There is deliberately no reclaim function here.** ATS distinguishes the two paths and so do we:
+
+| | Who can call | When | Our code |
+|---|---|---|---|
+| `releaseHoldByPartition` | the escrow (us) | before expiry | wrapped as `releaseHold` above |
+| `reclaimHoldByPartition` | **anyone** | after expiry | none needed — a direct ATS call |
+
+Reclaim requires no venue code at all. Say so in the README under *Known limitations*: **if Sotto disappears entirely, a seller's tokens are still recoverable by any address once the hold expires.** The venue cannot trap collateral. That is a real property, it costs nothing, and it is exactly what a settlement judge looks for.
+
 `settle` and `deliver` must consume the **same nonce space** so a Trade cannot be settled twice, once down each path. Factor the shared logic — signature recovery, hold validation, nonce consumption, hold execution — into one internal function; `settle` wraps it with the cash pull, `deliver` wraps it with the role check.
 
-`settle` body, in order — do not reorder, the cash leg must come before the security leg so a compliance revert on delivery cannot leave cash moved:
+`settle` body, in order — do not reorder. The reason is **not** that a revert would otherwise leave cash stranded; inside one EVM transaction a revert unwinds both legs whatever the order. The reason is HIP-551: a batch may contain at most one `ContractExecuteTransaction` and it must be the **last** inner transaction, so Path B's cash leg has to be a native transfer that precedes the contract call. Path A mirrors that ordering so both paths reason identically and the tests transfer between them.
 
 1. `require(block.timestamp <= t.deadline)` → `DeadlineExpired`
 2. Recover both signatures over the EIP-712 digest; `require(signer == t.seller)` and `require(signer == t.buyer)`; consume nonces.
 3. Read the hold via `getHoldForByPartition`; assert `escrow == address(this)`, `amount >= t.quantity`, `expirationTimestamp > block.timestamp`.
 4. `IERC20(t.cashToken).transferFrom(t.buyer, t.seller, t.notional)` — check the boolean return.
-5. `IHoldByPartition(t.assetToken).executeHoldByPartition(HoldIdentifier(t.partition, t.seller, t.holdId), t.buyer, t.quantity)`.
+5. Execute the hold **and check the return**. The signature is `executeHoldByPartition(...) external returns (bool success_, bytes32 partition_)` — a two-value return, verified against `reference/ats/`:
+
+   ```solidity
+   (bool success_, ) = IHoldByPartition(t.assetToken).executeHoldByPartition(
+       IHoldTypes.HoldIdentifier(t.partition, t.seller, t.holdId), t.buyer, t.quantity
+   );
+   require(success_, "delivery failed");
+   ```
+
+   **This `require` is load-bearing.** If ATS ever signals a compliance failure by returning `false` rather than reverting, then without it the cash has moved and the bond has not — precisely the outcome this entire project exists to make impossible. Do not drop it because "it reverts anyway."
+
+   Same rule for step 4: `IERC20.transferFrom` returns a bool. Check it.
 6. `emit Settled(t.rfqId, t.seller, t.buyer, t.quantity, t.notional, t.assetToken, t.cashToken)`.
 
 Reentrancy guard on `settle`. No admin key that can move user funds — say this in the README, judges look for it.
