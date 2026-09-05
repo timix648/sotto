@@ -317,6 +317,42 @@ Reproduce with `npx tsx backend/src/scripts/deploy-bond.ts [--dry] [configId]`.
 nonce has moved, so a repeat static call predicts the *next* deployment. That bug briefly put
 the wrong address in `.env`.
 
+## Balances: `balanceOf` is AVAILABLE, not total
+
+For B2's Total / Available / Held / Locked card, measured on the live bond after
+placing a 1-unit hold against a 980-unit position:
+
+| call | value | meaning |
+|---|---|---|
+| `balanceOf(account)` | 979 | **available** — total minus held |
+| `balanceOfByPartition(partition, account)` | 979 | same, per partition |
+| `getHeldAmountFor(account)` | 1 | **held** |
+| `getHeldAmountForByPartition(partition, account)` | 1 | same, per partition |
+
+So **Total = `balanceOf` + `getHeldAmountFor`**. `balanceOf` alone is not the
+position — placing a hold makes it drop, which is exactly the animation §B2
+wants ("available drops, held rises, total does not move"), but it means a naive
+`balanceOf` reads as if the seller lost tokens.
+
+`Locked` is a separate concept with its own facet (`_LOCKER_ROLE`) and is not the
+same as held.
+
+## Proven end to end on testnet
+
+| step | result |
+|---|---|
+| Bond issued from factory `0.0.7708432` | `0xD53072649037FEecD305920087791a37dF8D517F` |
+| SottoSettlement deployed | `0x98164562Ac1A7005C5E0e00C1018669fc62843E8` |
+| KYC granted, 1000 units issued to seller | ✅ |
+| **Atomic DvP: 20 units ↔ 19.67 real USDC** | tx `0x4c90cf5b…52fd`, gas 467,664 |
+| **KYC-revoked settlement reverts, both ledgers unchanged** | ✅ |
+
+The failure demo is sized so the cash leg *would* succeed (0.30 USDC notional
+against a 0.33 USDC balance and a sufficient allowance), so the revert is
+provably the compliance check on the delivery leg and not a funding problem.
+`settle()` moves cash at step 4 and delivers at step 5, so the cash transfer does
+execute before the delivery reverts — and the revert unwinds it.
+
 ## Still unknown
 
 - Whether the SDK supports a **headless / server-key** issuance path, or whether issuance
