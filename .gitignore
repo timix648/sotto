@@ -1,0 +1,10 @@
+reference/
+node_modules/
+.env
+.env.local
+*.log
+dist/
+build/
+artifacts/
+cache/
+typechain-types/
