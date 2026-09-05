@@ -88,8 +88,17 @@ search claimed the id was `0.0.13078`; that is `NFTBURNIUB623`, an NFT with zero
 Always verify a token id against the mirror node before trusting it.
 
 **Faucet:** 20 USDC per address, per chain, every 2 hours (the higher of the two figures
-§A3 said were in conflict). At that rate no custom token is needed — three addresses give
-far more than the ~20 USDC demo notional.
+§A3 said were in conflict). **Confirmed working 2026-09-05** — 20 USDC landed on ISSUER and
+DEALER once associated.
+
+No custom token is needed. The buyer (winning dealer) is the only account that needs a cash
+balance, because the cash leg is `transferFrom(buyer, seller, notional)`; the seller only
+receives. DEALER holding 20 USDC covers the ~20 USDC demo notional on its own. So every
+settlement can run on real Circle USDC with nothing minted for convenience — the outcome
+§A3 calls materially stronger.
+
+**A failed drip still consumes the 2-hour window.** The pre-association attempt burned
+SELLER's window, so SELLER received nothing on the retry. Associate first, then drip.
 
 **Association trap.** `maxAutomaticTokenAssociations = -1` means *unlimited automatic
 association slots*, **not** *pre-associated*. An association is only created when Hedera
