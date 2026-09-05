@@ -178,6 +178,104 @@ registered from a later deployment batch.
 **Decisive test:** attempt a deployment against `0x…03` and read the emitted event. Testnet
 gas is free-ish and each account holds 100 HBAR. Do not spend more time inferring.
 
+## ⚠️ THE BIG ONE: the deployed factory is v3.1.0, and HEAD reordered the struct
+
+**Read this before writing any ATS calldata.**
+
+The factory proxy `0.0.7708432` has an EIP-1967 implementation slot still pointing at
+`0.0.7708430` — the **January 2026 implementation, never upgraded**. That is ATS **v3.1.0**
+(release commit `ad8f601`, published 2026-01-21, factory deployed 2026-01-22).
+
+Repo HEAD ships v8.0.0 and **reordered all 17 fields of `SecurityData`**. Same fields, same
+types, different order — so a different tuple, a different selector, and a call that cannot
+dispatch.
+
+| | |
+|---|---|
+| HEAD field order → selector | `0x29002951` — **absent** from the deployed bytecode |
+| v3.1.0 field order → selector | `0x5133f0e0` — **present** ✅ |
+
+The failure mode is brutal: `execution reverted` with **no data**, no custom error, no reason
+string, identical for every configId — because the proxy has no function to dispatch to. It
+looks exactly like "wrong config" and is not.
+
+`deployed-addresses.md` is correct about *addresses* while being five months stale about
+*ABI*. Do not read struct definitions from HEAD.
+
+**v3.1.0 `SecurityData` order — this is what is deployed:**
+
+```
+bool    arePartitionsProtected
+bool    isMultiPartition
+address resolver
+        ResolverProxyConfiguration { bytes32 key; uint256 version }
+        Rbac[] rbacs
+bool    isControllable
+bool    isWhiteList
+uint256 maxSupply
+        ERC20MetadataInfo { string name; string symbol; string isin; uint8 decimals }
+bool    clearingActive
+bool    internalKycActivated
+address[] externalPauses
+address[] externalControlLists
+address[] externalKycLists
+bool    erc20VotesActivated
+address compliance
+address identityRegistry
+```
+
+`BondData`, `BondDetailsData`, `ERC20MetadataInfo`, `ResolverProxyConfiguration` and
+`FactoryRegulationData` are unchanged between v3.1.0 and HEAD. Only `SecurityData` moved.
+
+**How to read the right source:** the runbook's `--depth 1` clone has no history. Run
+`git fetch --unshallow --filter=blob:none` in `reference/ats`, then read at `ad8f601`
+(e.g. `git show ad8f601:packages/ats/contracts/contracts/interfaces/factory/IFactory.sol`).
+Note the path differs from HEAD too — it is `contracts/interfaces/factory/`, not
+`contracts/factory/`.
+
+**This is MECHANICS.md §4.7 on a different chain.** Umbra: *"a Daml upgrade may only append
+fields — reordering `SwapSettlement` had the participant reject the package outright."*
+Here it is EVM selector dispatch instead of Canton package vetting, and the same rule holds.
+
+## Config id → security type, proven not guessed
+
+Probed each configuration's facet addresses for type-specific selectors
+(`getRate()` on the fixedRate facet, `getKpiLinkedRateInterestRate()` on kpiLinkedRate):
+
+| config | facets | identified as |
+|---|---|---|
+| `0x…01` | 44 | **Equity** |
+| `0x…02` | 47 | bond, no subtype marker |
+| `0x…03` | 48 | **BondFixedRate** ← what we use |
+| `0x…04` | 48 | bond (variable) |
+| `0x…05` | 49 | bond + KPI |
+
+The obvious guess — that configs follow `SecurityType` enum order — is **wrong**: `0x…01` is
+Equity, not BondVariableRate.
+
+## ISIN is checksum-validated on-chain
+
+`isinValidator.sol` implements the ISO 6166 check digit. `XS0000000001` **reverts**
+(`WrongISINChecksum`). The valid demo ISIN is **`XS0000000009`**. The algorithm was verified
+by reproducing a real ISIN, Apple's `US0378331005`.
+
+## Deployed demo bond
+
+| | |
+|---|---|
+| Address | `0xD53072649037FEecD305920087791a37dF8D517F` |
+| Name / symbol | Sotto Demo Senior Note 2030 / `STO-BOND-A` |
+| Config | `0x…03` (BondFixedRate) version 1 |
+| Regulation | **REG_S** — chosen because REG_D imposes a 6-month-to-1-year resale hold, which would block the secondary trading this project exists to demonstrate |
+| Flags | `internalKycActivated: true` (the failure demo needs it), `isControllable: true`, `isMultiPartition: false` (default partition `0x…01`), `clearingActive: false` |
+| Tx | `0xd4ed959233285ca6471cebd3abe6b0534d3444a7e353cc3a95b040609930cfb9` |
+
+Reproduce with `npx tsx backend/src/scripts/deploy-bond.ts [--dry] [configId]`.
+
+**Read the new address from the receipt logs, not a second `staticCall`** — after the tx the
+nonce has moved, so a repeat static call predicts the *next* deployment. That bug briefly put
+the wrong address in `.env`.
+
 ## Still unknown
 
 - Whether the SDK supports a **headless / server-key** issuance path, or whether issuance
