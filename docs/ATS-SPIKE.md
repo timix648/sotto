@@ -237,6 +237,47 @@ Note the path differs from HEAD too — it is `contracts/interfaces/factory/`, n
 fields — reordering `SwapSettlement` had the participant reject the package outright."*
 Here it is EVM selector dispatch instead of Canton package vetting, and the same rule holds.
 
+## Role hashes ALSO differ between v3.1.0 and HEAD
+
+The same version trap, second instance, and this one is nastier because it fails
+*silently*.
+
+| role | HEAD | v3.1.0 (deployed) |
+|---|---|---|
+| ISSUER | `0x5eeaf560…` | `0x4be32e88…` |
+| KYC | `0x754f499f…` | `0x6fbd421e…` |
+| CONTROLLER | `0xb4d2b850…` | `0xa72964c0…` |
+| INTERNAL_KYC_MANAGER | `0xdd78fdcd…` | `0x3916c5c9…` |
+
+Only `DEFAULT_ADMIN_ROLE` (`0x00`) is stable across versions.
+
+The `rbacs` array at issuance used HEAD's constants, so every grant landed on a
+hash the deployed contract never checks. **`hasRole()` returns `true` for those
+hashes** — because they really were granted — **while every guarded call still
+reverts**, since the contract asks about a different key. A role check that
+passes and a call that reverts is a genuinely confusing pair.
+
+`DEFAULT_ADMIN_ROLE` being stable is what makes it repairable without
+redeploying: the admin can grant the correct hashes after the fact. `seed.ts`
+does exactly that.
+
+v3.1.0 roles live in **two** files — `layer_0/constants/roles.sol` and
+`layer_1/constants/roles.sol`. `_KYC_ROLE` and `_SSI_MANAGER_ROLE` are only in
+layer_1. HEAD has a single `constants/roles.sol`.
+
+## Granting KYC needs an SSI issuer first
+
+`grantKyc(account, vcId, validFrom, validTo, issuer)` is guarded by
+`onlyIssuerListed(_issuer)`. The KYC issuer must be registered on the token's own
+issuer list via `addIssuer(address)`, which requires `_SSI_MANAGER_ROLE` — a role
+the issuance `rbacs` array did not include at all. Without this every KYC grant
+reverts with no reason string.
+
+Order that works: grant correct roles → `addIssuer` → `grantKyc` → `issueByPartition`.
+
+`issueByPartition` takes `IssueData { bytes32 partition; address tokenHolder;
+uint256 value; bytes data }`.
+
 ## Config id → security type, proven not guessed
 
 Probed each configuration's facet addresses for type-specific selectors
