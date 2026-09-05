@@ -154,6 +154,9 @@ repairable without redeploying.
 
 ---
 
+We reported the version-compatibility trap upstream:
+[hashgraph/asset-tokenization-studio#1395](https://github.com/hashgraph/asset-tokenization-studio/pull/1395).
+
 ## Repository layout
 
 ```
