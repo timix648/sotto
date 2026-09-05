@@ -183,8 +183,7 @@ gas is free-ish and each account holds 100 HBAR. Do not spend more time inferrin
 **Read this before writing any ATS calldata.**
 
 The factory proxy `0.0.7708432` has an EIP-1967 implementation slot still pointing at
-`0.0.7708430` — the **January 2026 implementation, never upgraded**. That is ATS **v3.1.0**
-(release commit `ad8f601`, published 2026-01-21, factory deployed 2026-01-22).
+`0.0.7708430` — the **January 2026 implementation, never upgraded**. The docs label that deployment **contract version 4.0.0** (deployed 2026-01-22).
 
 Repo HEAD ships v8.0.0 and **reordered all 17 fields of `SecurityData`**. Same fields, same
 types, different order — so a different tuple, a different selector, and a call that cannot
@@ -193,7 +192,7 @@ dispatch.
 | | |
 |---|---|
 | HEAD field order → selector | `0x29002951` — **absent** from the deployed bytecode |
-| v3.1.0 field order → selector | `0x5133f0e0` — **present** ✅ |
+| bools-first order (v3.1.0-ats through v5.0.0-ats) → selector | `0x5133f0e0` — **present** ✅ |
 
 The failure mode is brutal: `execution reverted` with **no data**, no custom error, no reason
 string, identical for every configId — because the proxy has no function to dispatch to. It
@@ -202,7 +201,7 @@ looks exactly like "wrong config" and is not.
 `deployed-addresses.md` is correct about *addresses* while being five months stale about
 *ABI*. Do not read struct definitions from HEAD.
 
-**v3.1.0 `SecurityData` order — this is what is deployed:**
+**Deployed `SecurityData` order** (identical in v3.1.0-ats, v4.1.0-ats and v5.0.0-ats, so the deployed 4.0.0 uses it; the reorder landed between v5 and v8):
 
 ```
 bool    arePartitionsProtected

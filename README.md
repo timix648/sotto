@@ -116,15 +116,19 @@ have you find it.
 We built against the deployed factory rather than a local deployment, and hit several things
 worth writing down. Full detail in [`docs/ATS-SPIKE.md`](docs/ATS-SPIKE.md).
 
-**The deployed factory is ATS v3.1.0 (January 2026) and repo HEAD is not compatible with it.**
-The proxy `0.0.7708432` still points at implementation `0.0.7708430` — never upgraded — while
-HEAD reordered all 17 fields of `SecurityData`. Same fields, different order, different
-selector:
+**The deployed factory is contract version 4.0.0 (January 2026) and `main` is not
+ABI-compatible with it.** The proxy `0.0.7708432` still points at implementation
+`0.0.7708430` — never upgraded — while `main` (contracts 8.0.0) reordered all 17 fields of
+`SecurityData`. Same fields, same types, different order, so a different tuple and a
+different selector:
 
-| | |
-|---|---|
-| HEAD field order | `0x29002951` — **absent** from the deployed bytecode |
-| v3.1.0 field order | `0x5133f0e0` — present |
+| `deployBond` field order | selector | in the deployed bytecode? |
+|---|---|---|
+| `main` / contracts 8.0.0 | `0x29002951` | **no** |
+| releases v3.1.0 → v5.0.0 (bools first) | `0x5133f0e0` | **yes** |
+
+The bools-first layout is stable across `v3.1.0-ats`, `v4.1.0-ats` and `v5.0.0-ats`, so the
+deployed 4.0.0 uses it; the reorder landed somewhere between v5 and v8.
 
 The failure mode is `execution reverted` with **no data and no reason string**, identical for
 every `configId`, because the proxy has no function to dispatch to. It looks exactly like a
