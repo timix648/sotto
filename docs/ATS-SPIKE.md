@@ -111,6 +111,73 @@ Related, and it bites the failure demo: granting KYC requires the token to be as
 with the account **even when the account has unlimited auto-associations**. The seed script
 must associate every demo account with the bond before granting KYC.
 
+## Issuance: the real calldata shape
+
+`Factory.deployBond(BondData, FactoryRegulationData)`. `Factory.sol` imports
+`./IFactory.sol` (**not** the ERC3643 variant, which is an auto-generated copy for T-REX ABI
+compatibility — do not read that one).
+
+```
+BondData
+  SecurityData security
+  BondDetailsData bondDetails
+  address[] proceedRecipients
+  bytes[]   proceedRecipientsData
+
+SecurityData
+  IBusinessLogicResolver resolver          <- BLR 0xEFEF4CAe9642631Cfc6d997D6207Ee48fa78fe42
+  uint256 maxSupply
+  ResolverProxyConfiguration { bytes32 key; uint256 version }   <- configId + configVersion
+  ERC20MetadataInfo { string name; string symbol; string isin; uint8 decimals }
+  Rbac[] rbacs                              <- { bytes32 role; address[] members }
+  address[] externalPauses / externalControlLists / externalKycLists
+  address compliance, identityRegistry
+  bool arePartitionsProtected, isMultiPartition, isControllable,
+       isWhiteList, clearingActive, internalKycActivated, erc20VotesActivated
+
+BondDetailsData
+  bytes3  currency          <- BYTES3, not a string. "USD" packed.
+  uint256 nominalValue
+  uint8   nominalValueDecimals
+  uint256 startingDate, maturityDate
+
+FactoryRegulationData
+  RegulationType    { NONE, REG_S, REG_D }
+  RegulationSubType { NONE, REG_D_506_B, REG_D_506_C }
+  AdditionalSecurityData { bool countriesControlListType; string listOfCountries; string info }
+```
+
+`erc20VotesActivated` is a seventh flag the SDK request list does not surface.
+
+Roles are in `constants/roles.sol` — `DEFAULT_ADMIN_ROLE = 0x00`, plus `ROLE_ISSUER`,
+`ROLE_CONTROLLER`, `ROLE_KYC`, `ROLE_INTERNAL_KYC_MANAGER`, `ROLE_CORPORATE_ACTION`,
+`ROLE_PAUSER`, `ROLE_CLEARING_VALIDATOR` and ~25 others, each a precomputed bytes32.
+The failure demo needs the issuer to hold `ROLE_ISSUER`, `ROLE_CONTROLLER` and the KYC roles.
+
+## Config resolution — read from the live BLR, verified
+
+Queried `0.0.7707874` on testnet (`backend/src/scripts/resolve-config.ts`):
+
+- **5 registered configurations**: `0x…01` through `0x…05`
+- **every one is at version `1`** — **not `0`**. The ATS docs example shows
+  `configVersion: "0"`, which would fail with `ResolverProxyConfigurationNoRegistered`.
+  This is a live trap in the vendor's own documentation.
+- 192 registered business logics (facets)
+
+**The SDK does not map security type to config id.** `CreateBondFixedRateCommandHandler`
+throws `"Config Id not found in request"` — the caller supplies it. So the mapping is
+application knowledge that exists nowhere in the SDK or the docs.
+
+**Unproven hypothesis** for which config is which. `SecurityType` is ordered
+`BondVariableRate, Equity, BondFixedRate, BondKpiLinkedRate, Loan`, and there are exactly 5
+configs, suggesting `0x…01`→VariableRate, `0x…02`→Equity, **`0x…03`→BondFixedRate**,
+`0x…04`→KpiLinked, `0x…05`→Loan. Facet counts are 44/47/48/48/49, which is consistent but
+not conclusive — configs 3–5 share almost no facet *addresses* with 1–2, so they were likely
+registered from a later deployment batch.
+
+**Decisive test:** attempt a deployment against `0x…03` and read the emitted event. Testnet
+gas is free-ish and each account holds 100 HBAR. Do not spend more time inferring.
+
 ## Still unknown
 
 - Whether the SDK supports a **headless / server-key** issuance path, or whether issuance
