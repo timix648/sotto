@@ -653,12 +653,75 @@ The cash leg settles in **Circle's actual USDC on Hedera testnet: token `0.0.429
 **Owner: frontend agent. Starts hour one against the mock server. Never blocked.**
 
 ### B0. Foundation
-- Next.js App Router, TypeScript, Tailwind, `wagmi` + `viem` for EIP-712 and contract calls, HashPack via WalletConnect.
+
+> **THE BACKEND IS ALREADY BUILT AND LIVE ON TESTNET.** Read this block before writing
+> anything — it will save you a day.
+
+**Live addresses (also served by `GET /api/health`, never hardcode them):**
+
+| | |
+|---|---|
+| Bond `STO-BOND-A` | `0xD53072649037FEecD305920087791a37dF8D517F` |
+| SottoSettlement | `0x98164562Ac1A7005C5E0e00C1018669fc62843E8` (Sourcify `exact_match`) |
+| SottoCouponScheduler | `0xb97BF0203d5C914d40100C12683B2ed257E9cEec` |
+| HCS audit topic | `0.0.10383803` |
+| Cash | real Circle USDC `0.0.429274`, EVM `0x0000000000000000000000000000000000068cDa`, **6 dp** |
+
+**Two servers, one wire contract.** `npm run mock` serves §3.4 from fixtures with a scripted
+RFQ that walks every state on a 90-second loop, including `FAILED` and `EXPIRED` — states you
+cannot conjure on demand against a real chain. `npm run serve` serves the identical surface
+from testnet. **Build against the mock, switch by changing the base URL, change nothing else.**
+`GET /api/health` returns `mock: true|false` so you can show which you are on.
+
+**Traps that will cost you hours if you meet them cold:**
+
+- **`balanceOf` returns AVAILABLE, not total.** Total is `balanceOf + getHeldAmountFor`. Use
+  `GET /api/balances/:account`, which returns all four numbers already computed. If you call
+  `balanceOf` yourself, placing a hold looks like the seller *lost* tokens — and B2's whole
+  animation is built on total staying still.
+- **TypeScript 7 breaks ts-node-based tooling.** `npm i -D typescript` now installs 7.x, whose
+  compiler API ts-node cannot read; you get `Cannot read properties of undefined (reading
+  'fileExists')`. Pin `typescript@^5.6`.
+- **viem rejects non-EIP-55-checksummed addresses at encode time.** Run every hardcoded
+  address through `getAddress()`.
+- **Hedera needs `evmVersion: 'cancun'`** if you compile anything (OpenZeppelin uses `mcopy`).
+- The mock and the live server both bind **:4000**. Kill one before starting the other, or you
+  will read fixtures believing they are chain data — on Windows `pkill` silently does nothing;
+  kill by port.
+
+**Stack:** Next.js App Router, TypeScript, Tailwind, `wagmi` + `viem`. EIP-712 signing is
+`signTypedData` with the domain from `packages/shared/src/eip712.ts` — do not redefine it, the
+contract verifies against exactly those fields.
+
+**Wallets — use existing libraries, never roll your own:**
+
+- HashPack / Blade → `@hashgraph/hedera-wallet-connect` (Hedera WalletConnect 2.0). Needs a
+  projectId from cloud.walletconnect.com.
+- MetaMask → wagmi's injected connector on chainId `296`.
+- The contract does not care where a signature came from: today's settlements are signed by
+  `ethers.Wallet` and a HashPack signature over the same typed data recovers to the same
+  address. **Nothing in the backend needs to change when you add wallets.**
+- **Day-1 unknown worth testing early:** whether a browser wallet will sign an inner
+  transaction carrying a `batchKey` (Path B). If it will not, Path A stays wallet-signed and
+  Path B runs with backend keys for the video — say so on camera rather than hiding it.
+- `docs/MECHANICS.md` §4 has a large amount of hard-won wallet material — rate limits on
+  wallet-hosted APIs, CIP-0103 discovery, session restore, provider fallback. Read it before
+  starting wallet work, not after.
+
 - Hedera testnet chain config: chainId `296`, JSON-RPC relay `https://testnet.hashio.io/api`, explorer `https://hashscan.io/testnet`.
 - Role switcher in the header — Issuer / Seller / Dealer — driven by connected address, with a demo override. Judges watch a 5-minute video; they need to see which hat you're wearing without you explaining it.
 
 ### B1. Issuer portal
 - Issue-bond form: name, symbol, ISIN, nominal, coupon rate, frequency, maturity.
+- **ISIN is checksum-validated on-chain (ISO 6166) — validate it client-side before
+  submitting, or the user gets an opaque revert.** `XS0000000001` is invalid; `XS0000000009`
+  is valid. The check digit algorithm is in `docs/ATS-SPIKE.md`.
+- **Asset-class switch: Bond or Equity.** The track is judged on *"real asset classes and real
+  lifecycle management… over a token with a name on it"* — plural. Equity uses a different ATS
+  configuration and a different lifecycle (dividends and voting rights rather than coupons and
+  maturity), and the same RFQ engine and the same `settle()` handle both with no per-asset
+  branch. Showing one venue trading two asset classes is what turns this from "an RFQ for one
+  bond" into secondary-market infrastructure.
 - KYC panel: grant/revoke per account, with a visible toggle. **This toggle is what you flip on camera to trigger the failed settlement.** Make it prominent.
 - Coupon schedule view: each coupon date, its scheduled-call address, and status (`Scheduled` / `Executed`).
 
