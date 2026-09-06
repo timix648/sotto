@@ -13,7 +13,10 @@ import { computeCommit } from '../../../packages/shared/src/commit.js';
 import { rfqIdToBytes32 } from '../../../packages/shared/src/rfq-id.js';
 import * as F from './fixtures.js';
 
-const PORT = Number(process.env.MOCK_PORT ?? 4000);
+// 4010, NOT 4000. The live API owns 4000. When both bound the same port the
+// mock silently shadowed it and /api/health answered mock:true with fixture
+// addresses while we believed we were reading the chain. Never share the port.
+const PORT = Number(process.env.MOCK_PORT ?? 4010);
 const now = () => Math.floor(Date.now() / 1000);
 const hex64 = () => '0x' + randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
 
@@ -384,6 +387,11 @@ app.get('/ws', { websocket: true }, (socket) => {
 
 startCycle();
 await app.listen({ port: PORT, host: '0.0.0.0' });
-console.log('\n  Sotto mock server  ->  http://localhost:' + PORT);
+console.log('\n  ==========================================================');
+console.log('   SOTTO MOCK - FIXTURES ONLY. THIS IS NOT THE CHAIN.');
+console.log('   Offline UI work only. Never film a demo against this.');
+console.log('   The live API is:  npm run serve   (port 4000)');
+console.log('  ==========================================================');
+console.log('\n  mock server        ->  http://localhost:' + PORT);
 console.log('  websocket          ->  ws://localhost:' + PORT + '/ws');
 console.log('  scripted RFQ       ->  90s loop, rotating SETTLED / FAILED / EXPIRED\n');

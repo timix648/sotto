@@ -670,11 +670,14 @@ The cash leg settles in **Circle's actual USDC on Hedera testnet: token `0.0.429
 | HCS audit topic | `0.0.10383803` |
 | Cash | real Circle USDC `0.0.429274`, EVM `0x0000000000000000000000000000000000068cDa`, **6 dp** |
 
-**Two servers, one wire contract.** `npm run mock` serves §3.4 from fixtures with a scripted
-RFQ that walks every state on a 90-second loop, including `FAILED` and `EXPIRED` — states you
-cannot conjure on demand against a real chain. `npm run serve` serves the identical surface
-from testnet. **Build against the mock, switch by changing the base URL, change nothing else.**
-`GET /api/health` returns `mock: true|false` so you can show which you are on.
+**Build against the LIVE API. `npm run serve`, port 4000, real testnet.** Everything below is
+deployed and working, so there is no reason to build against fixtures.
+
+`npm run mock` still exists on **port 4010** for offline work when testnet is down or you are
+styling a state repeatedly. It is fixtures, not the chain. It deliberately does NOT share a
+port with the live API: when it did, it silently shadowed it and `/api/health` answered
+`mock: true` with fixture addresses while we believed we were reading testnet. **Never record
+a demo against it.** `GET /api/health` returns `mock: true|false` — check it before you film.
 
 **Traps that will cost you hours if you meet them cold:**
 
