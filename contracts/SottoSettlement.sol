@@ -10,6 +10,12 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.s
 
 import { IHoldByPartition } from "./interfaces/IHoldByPartition.sol";
 
+/// @notice Minimal view of SottoNavOracle. Reverts if the price is stale or outside the band.
+interface ISottoNavOracle {
+    function requireWithinBand(address asset, uint256 price, uint16 bandBps) external view;
+    function hasReference(address asset) external view returns (bool);
+}
+
 /**
  * @title SottoSettlement
  * @notice Atomic delivery-versus-payment for ATS-issued securities.
@@ -53,6 +59,15 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
     mapping(address => mapping(uint256 => bool)) public nonceUsed;
     mapping(address => uint256) private _nextNonce;
 
+    /// @notice Optional NAV band guard. Zero address = disabled.
+    /// @dev A commit-reveal auction resists front-running but not a seller
+    ///      awarding themselves a bad price through a colluding dealer. With an
+    ///      oracle set, a trade priced more than `bandBps` from the reference NAV
+    ///      cannot settle. Enforced HERE rather than in the backend: a venue
+    ///      that only checks its own arithmetic is asking to be trusted.
+    ISottoNavOracle public navOracle;
+    uint16 public bandBps = 500; // 5%
+
     event Settled(
         bytes32 indexed rfqId,
         address indexed seller,
@@ -63,6 +78,7 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
         address cashToken
     );
     event HoldReleased(address indexed assetToken, address indexed holder, uint256 holdId, uint256 amount);
+    event NavOracleSet(address indexed oracle, uint16 bandBps);
 
     error DeadlineExpired(uint256 deadline, uint256 nowTs);
     error SignatureInvalid(address expected, address recovered);
@@ -73,10 +89,22 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
     error DeliveryFailed();
     error ReleaseFailed();
     error ZeroQuantity();
+    error NoNavReference(address asset);
 
     constructor(address admin) EIP712("Sotto", "1") {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(RELAYER_ROLE, admin);
+    }
+
+    /**
+     * @notice Enable or disable the NAV band guard.
+     * @dev Admin-only, and it can only refuse trades - it can never move funds,
+     *      so this does not weaken the "no admin key can move user funds" claim.
+     */
+    function setNavOracle(ISottoNavOracle oracle, uint16 newBandBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        navOracle = oracle;
+        bandBps = newBandBps;
+        emit NavOracleSet(address(oracle), newBandBps);
     }
 
     // ------------------------------------------------------------------ views
@@ -196,6 +224,14 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
 
         address recoveredBuyer = ECDSA.recover(digest, buyerSig);
         if (recoveredBuyer != t.buyer) revert SignatureInvalid(t.buyer, recoveredBuyer);
+
+        // NAV band guard. impliedPrice is per 100 nominal, matching the venue's
+        // quote convention: notional = price * quantity / 100.
+        if (address(navOracle) != address(0)) {
+            if (!navOracle.hasReference(t.assetToken)) revert NoNavReference(t.assetToken);
+            uint256 impliedPrice = (t.notional * 100) / t.quantity;
+            navOracle.requireWithinBand(t.assetToken, impliedPrice, bandBps);
+        }
 
         // Consume the nonce INSIDE the settling call, not merely check it -
         // otherwise a signature is replayable.

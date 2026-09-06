@@ -6,7 +6,7 @@
 // So we post Hardhat's standard-JSON input to the v2 API directly.
 //
 //   npx hardhat compile && npx tsx backend/src/scripts/verify-sourcify.ts
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 
 const SOURCIFY = 'https://sourcify.dev/server';
 const CHAIN = '296';
@@ -14,6 +14,7 @@ const CHAIN = '296';
 const TARGETS = [
   { name: 'SottoSettlement', path: 'contracts/SottoSettlement.sol', envKey: 'SETTLEMENT_ADDRESS' },
   { name: 'SottoCouponScheduler', path: 'contracts/SottoCouponScheduler.sol', envKey: 'SCHEDULER_ADDRESS' },
+  { name: 'SottoNavOracle', path: 'contracts/SottoNavOracle.sol', envKey: 'NAV_ORACLE_ADDRESS' },
 ];
 
 function loadEnv(): Record<string, string> {
@@ -25,10 +26,24 @@ function loadEnv(): Record<string, string> {
   return out;
 }
 
-/** Find the build-info that compiled a given source file. */
+/**
+ * Find the build-info that compiled a given source file.
+ *
+ * Must be the NEWEST match, not the first. Recompiling leaves older build-info
+ * files behind that still contain the source, and submitting one produces
+ * "recompiled bytecode length doesn't match the onchain bytecode length" - which
+ * reads like a compiler-settings problem and is really a stale-artifact problem.
+ */
 function findBuildInfo(sourcePath: string) {
-  for (const f of readdirSync('artifacts/build-info')) {
-    const bi = JSON.parse(readFileSync(`artifacts/build-info/${f}`, 'utf8'));
+  const candidates = readdirSync('artifacts/build-info')
+    .map(f => {
+      const path = `artifacts/build-info/${f}`;
+      return { path, mtime: statSync(path).mtimeMs };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+
+  for (const c of candidates) {
+    const bi = JSON.parse(readFileSync(c.path, 'utf8'));
     if (bi.input?.sources?.[sourcePath]) return bi;
   }
   return null;

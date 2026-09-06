@@ -204,3 +204,57 @@ describe('SottoSettlement', () => {
     );
   });
 });
+
+describe('SottoSettlement — NAV band guard', () => {
+  async function bandFixture() {
+    const base = await fixture();
+    const oracle = await (await ethers.getContractFactory('SottoNavOracle')).deploy(base.venue.address);
+    // Reference NAV 98.35 per 100 nominal, 6dp — the same convention the venue quotes in.
+    await oracle.publishNav(await base.bond.getAddress(), 98_350_000n, 6);
+    await base.settlement.connect(base.venue).setNavOracle(await oracle.getAddress(), 500); // 5%
+    return { ...base, oracle };
+  }
+
+  it('settles a trade priced inside the band', async () => {
+    const { seller, buyer, bond, cash, settlement } = await loadFixture(bandFixture);
+    // NOTIONAL 245_875_000 over 250 units -> implied 98_350_000, exactly on NAV.
+    const { trade, sellerSig, buyerSig } = await signedTrade(settlement, bond, cash, seller, buyer);
+    await expect(settlement.settle(trade, sellerSig, buyerSig)).to.emit(settlement, 'Settled');
+  });
+
+  it('refuses a trade priced outside the band, and moves nothing', async () => {
+    const { seller, buyer, bond, cash, settlement, oracle } = await loadFixture(bandFixture);
+    // 80.00 per 100 vs a 98.35 NAV — ~18.7% off, far outside 5%.
+    const { trade, sellerSig, buyerSig } = await signedTrade(settlement, bond, cash, seller, buyer, {
+      notional: 200_000_000n,
+    });
+
+    await expect(settlement.settle(trade, sellerSig, buyerSig)).to.be.revertedWithCustomError(
+      oracle,
+      'OutsideBand'
+    );
+    expect(await cash.balanceOf(seller.address)).to.equal(0n);
+    expect(await bond.balanceOf(buyer.address)).to.equal(0n);
+  });
+
+  it('refuses a stale NAV rather than trusting an old price', async () => {
+    const { seller, buyer, bond, cash, settlement, oracle } = await loadFixture(bandFixture);
+    await time.increase(25 * 3600); // maxAge is 24h
+    const { trade, sellerSig, buyerSig } = await signedTrade(settlement, bond, cash, seller, buyer);
+    await expect(settlement.settle(trade, sellerSig, buyerSig)).to.be.revertedWithCustomError(
+      oracle,
+      'StaleReference'
+    );
+  });
+
+  it('the band can only refuse a trade, never move funds', async () => {
+    const { venue, settlement } = await loadFixture(bandFixture);
+    // setNavOracle is the only admin surface added, and it takes no recipient.
+    expect(settlement.interface.getFunction('setNavOracle')!.inputs.map(i => i.type))
+      .to.deep.equal(['address', 'uint16']);
+    expect(await settlement.bandBps()).to.equal(500n);
+    // Disabling it restores the unguarded behaviour.
+    await settlement.connect(venue).setNavOracle(ethers.ZeroAddress, 500);
+    expect(await settlement.navOracle()).to.equal(ethers.ZeroAddress);
+  });
+});
