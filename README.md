@@ -28,6 +28,7 @@ untouched.
 - [How settlement works](#how-settlement-works)
 - [Two settlement paths](#two-settlement-paths)
 - [What makes this a venue and not a swap](#what-makes-this-a-venue-and-not-a-swap)
+- [The bond lifecycle, all of it on-chain](#the-bond-lifecycle-all-of-it-on-chain)
 - [Known limitations](#known-limitations)
 - [What we learned about ATS that is not in the docs](#what-we-learned-about-ats-that-is-not-in-the-docs)
 - [Architecture](#architecture)
@@ -45,10 +46,11 @@ Cash is **real Circle USDC**. Nothing was minted for convenience.
 |---|---|
 | Bond — `STO-BOND-A` | [`0xD53072649037FEecD305920087791a37dF8D517F`](https://hashscan.io/testnet/contract/0xD53072649037FEecD305920087791a37dF8D517F) |
 | Equity — `STO-EQ-A` | [`0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0`](https://hashscan.io/testnet/contract/0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0) |
+| Short note — `STO-BOND-M` (matures in minutes, for the redemption demo) | [`0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14`](https://hashscan.io/testnet/contract/0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14) |
 | `SottoSettlement` | [`0x73195C1f91899Bc1E822bb1D039033Eb38926931`](https://hashscan.io/testnet/contract/0x73195C1f91899Bc1E822bb1D039033Eb38926931) |
 | `SottoNavOracle` | [`0xe8E7c39ba776C3B0778BE4571e72F5669f662c04`](https://hashscan.io/testnet/contract/0xe8E7c39ba776C3B0778BE4571e72F5669f662c04) |
 | `SottoDealerBond` | [`0x192565BD006c559afFe12B4eAD0Cd749581702aF`](https://hashscan.io/testnet/contract/0x192565BD006c559afFe12B4eAD0Cd749581702aF) |
-| `SottoCouponScheduler` | [`0xb97BF0203d5C914d40100C12683B2ed257E9cEec`](https://hashscan.io/testnet/contract/0xb97BF0203d5C914d40100C12683B2ed257E9cEec) |
+| `SottoCouponScheduler` | [`0xe23f19786E146fADdBd6b3EEa9994e9feC0cf847`](https://hashscan.io/testnet/contract/0xe23f19786E146fADdBd6b3EEa9994e9feC0cf847) |
 | HCS audit topic | [`0.0.10383803`](https://hashscan.io/testnet/topic/0.0.10383803) |
 | Cash | Circle USDC `0.0.429274` · EVM `0x…068cDa` · 6 dp |
 
@@ -62,7 +64,10 @@ automatically. The source you are reading is the bytecode that ran.
 | Atomic DvP — 20 bonds ↔ 19.67 USDC, both legs, one transaction | [`0x4c90cf5b…52fd`](https://hashscan.io/testnet/transaction/0x4c90cf5b62ed65ebdabb7621bb76c80596cd78dc29cf2303c68b3ccbcab552fd) |
 | **Security for security** — 10 bonds ↔ 12 shares, no stablecoin in the trade | [`0x320fdef2…a1fb`](https://hashscan.io/testnet/transaction/0x320fdef2aacea95585bfaa7479a0e1fccc0e291ac03094218edb7cea22f5a1fb) |
 | HIP-551 atomic batch — 3 records, all SUCCESS, each party signs only its own leg | `0.0.10380177@1788646998.050909150` |
-| HIP-1215 — the contract schedules its own coupon | schedule [`0.0.10384068`](https://hashscan.io/testnet/transaction/0x19a509cdc0b424edc4c1da43b6579f7ef772c07e7c35229cfc3253828e2c2654) |
+| HIP-1215 — the contract schedules its own coupon, and the network **executes** it: `SUCCESS`, 0.0506 ℏ charged to the contract | schedule [`0.0.10390764`](https://hashscan.io/testnet/schedule/0.0.10390764) |
+| **Redemption at maturity** — 10 units burned, 10 USDC principal paid, supply 10 → 0 | [`0xf8f9c267…f7c6e`](https://hashscan.io/testnet/transaction/0xf8f9c267cbfefc2893ee3903e16608131d7c5689813642ab32ebe45a1c0f7c6e) |
+| **Redemption executed by the network, not by us** — HIP-1215 schedule burns the holder out at maturity, paid by the contract | schedule [`0.0.10390816`](https://hashscan.io/testnet/schedule/0.0.10390816) |
+| **Early redemption refused by the chain** — `BondMaturityDateWrong()`, 711s before maturity | see [Verify it yourself](#verify-it-yourself) |
 | **Compliance failure** — KYC revoked → settlement reverts, both ledgers unchanged | see [Verify it yourself](#verify-it-yourself) |
 | **Off-market award refused** — 80.00 bid against a 98.35 NAV rejected on-chain | fair price settled in [`0x35d42fb4…8997`](https://hashscan.io/testnet/transaction/0x35d42fb4df4644771020f9118bd8e4e5a5f149c1698e27dbebb3d17e8fec8997) |
 | **Dealer bond slashed** — to the seller, by the seller, venue gains nothing | [`0xf4d5a59b…6677`](https://hashscan.io/testnet/transaction/0xf4d5a59ba1d91f64d25457b71972d78f20272c5b92fec53044490853b6116677) |
@@ -99,10 +104,29 @@ curl -s https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.429274 | jq '{sy
 
 Testnet has dozens of impostor tokens called USDC. This one is Circle's.
 
-**The scheduled coupon exists and was created by the contract:**
+**The scheduled coupon was created by the contract, and the network ran it:**
 
 ```bash
-curl -s https://testnet.mirrornode.hedera.com/api/v1/schedules/0.0.10384068 | jq '{schedule_id,creator_account_id,expiration_time,executed_timestamp}'
+curl -s https://testnet.mirrornode.hedera.com/api/v1/schedules/0.0.10390764 \
+  | jq '{schedule_id,creator_account_id,payer_account_id,expiration_time,executed_timestamp}'
+```
+
+`payer_account_id` is `0.0.10390763` — the **scheduler contract**, not us. Now check what the
+execution actually did, because the schedule record alone will not tell you:
+
+```bash
+curl -s "https://testnet.mirrornode.hedera.com/api/v1/transactions?timestamp=1788689033.172686419" \
+  | jq -r '.transactions[] | "\(.name) \(.result) fee=\(.charged_tx_fee)"'
+# CONTRACTCALL SUCCESS fee=5063310
+```
+
+**The short note was redeemed at maturity — its supply is zero:**
+
+```bash
+curl -s -X POST https://testnet.hashio.io/api -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14","data":"0x18160ddd"},"latest"]}' \
+  | jq -r '.result'
+# 0x0…0  — totalSupply(), after 10 units were burned against the maturity date
 ```
 
 **And the failure paths, run against the live chain:**
@@ -227,6 +251,77 @@ at the chain, not merely in our engine.
 
 ---
 
+## The bond lifecycle, all of it on-chain
+
+A venue that can only trade an instrument has not tokenised it. Every leg below is enforced by
+a contract, not by our backend, and each one is checkable from the mirror node.
+
+| leg | what enforces it | not us, specifically |
+|---|---|---|
+| **Issuance** | ATS factory `0.0.7708432` | ISO 6166 ISIN checksum, regulation type, KYC status and role gates all live in the token |
+| **Trading** | `SottoSettlement.settle()` | delivery goes through `executeHoldByPartition`, so ATS runs compliance on the transfer itself |
+| **Coupon** | `SottoCouponScheduler` → HSS `0x16b` | the network executes the call at a consensus second; the venue does not need to be running |
+| **Redemption at maturity** | ATS `fullRedeemAtMaturity` | guarded by `onlyAfterCurrentMaturityDate(block.timestamp)` |
+
+**Maturity is a hard gate, and we tried to break it.** `redeem-demo.ts` calls
+`fullRedeemAtMaturity` 711 seconds before the maturity date. The chain answers
+`BondMaturityDateWrong()`. A venue that checked maturity in its own backend would have redeemed
+that holder early; this one cannot, and neither can we.
+
+**Maturity only ever moves forward.** `updateMaturityDate` carries the same modifier against
+the *new* date, so an issuer can extend a bond and can never pull one in. That is a real
+constraint on demos, not a detail: the 2030 senior note `STO-BOND-A` can never be matured on
+camera by anybody. Redemption runs against `STO-BOND-M`, a short-dated note issued for the
+purpose, whose maturity is minutes away.
+
+**ATS burns units; it does not move money.** There is no cash leg inside
+`fullRedeemAtMaturity`. Principal is `units × nominalValue` in the bond's own currency —
+`getPrincipalFor` returns it as a numerator/denominator pair — and `redeem-demo.ts` pays it in
+USDC **before** burning. A holder who has not been paid still holds the claim. In one run:
+
+```
+10 units × 1.000000 USD = 10.000000 USDC   paid   0x1c8c0a85…b6f7
+fullRedeemAtMaturity(holder)               burned 0xf8f9c267…f7c6e   gas 144,046
+holder units   10 -> 0
+totalSupply    10 -> 0
+holder cash    47.373000 -> 57.373000 USDC
+```
+
+### And then without us
+
+`schedule-redeem-demo.ts` hands the same redemption to the network. `SottoCouponScheduler`
+schedules `fullRedeemAtMaturity(holder)` through HIP-1215 for a second after maturity, and the
+script then stops transacting entirely — it only reads balances. The holder is redeemed out by
+the ledger:
+
+```
+schedule           0.0.10390816
+creator            0.0.10380177   (us, at scheduling time)
+payer              0.0.10390763   (the scheduler CONTRACT, at execution time)
+executed_timestamp 1788689389.019494208
+CONTRACTCALL SUCCESS  fee=15124830   (0.1512 ℏ, charged to the contract)
+
+t- 23s  holder units 5
+t-  8s  holder units 5
+t-  0s  holder units 0
+```
+
+```bash
+curl -s "https://testnet.mirrornode.hedera.com/api/v1/transactions?timestamp=1788689389.019494208" \
+  | jq -r '.transactions[] | "\(.name) \(.result) fee=\(.charged_tx_fee) target=\(.entity_id)"'
+# CONTRACTCALL SUCCESS fee=15124830 target=0.0.10390526
+```
+
+Two things had to be right for that to work, and both are easy to get wrong:
+
+- **The scheduled call's `msg.sender` is the scheduler contract**, so `_MATURITY_REDEEMER_ROLE`
+  is granted to the *contract*, not to an operator key. Nobody with a private key is authorised
+  to be online at maturity.
+- **The scheduling contract is the payer.** See [the coupon that fired and did
+  nothing](#the-coupon-that-fired-and-did-nothing).
+
+---
+
 ## Known limitations
 
 We would rather write these down than have you find them.
@@ -305,6 +400,33 @@ reason it is repairable without redeploying.
 - Hedera's published ATS documentation contains no contract API at all — the word "facet" does
   not appear. The source is the only authority.
 
+### The coupon that fired and did nothing
+
+Worth its own heading, because the failure is invisible from the obvious place to look.
+
+**A HIP-1215 scheduled call is paid for by the scheduling *contract*, not by whoever called
+it.** Our first `SottoCouponScheduler` had no `receive()` and therefore a zero HBAR balance.
+Its coupon was scheduled correctly, fired at exactly the second it was scheduled for, and the
+mirror node stamped the schedule `executed_timestamp: 1788647690.113138772`. Every check we
+had said it worked.
+
+The transaction at that timestamp says otherwise:
+
+```bash
+curl -s "https://testnet.mirrornode.hedera.com/api/v1/transactions?timestamp=1788647690.113138772" \
+  | jq -r '.transactions[] | "\(.name) \(.result) fee=\(.charged_tx_fee)"'
+# CONTRACTCALL INSUFFICIENT_PAYER_BALANCE fee=0
+```
+
+**`executed_timestamp` means the schedule was triggered, not that the call succeeded.** A
+scheduler that cannot pay produces a perfect-looking audit trail of transactions that did
+nothing. The same query against the funded scheduler returns `CONTRACTCALL SUCCESS
+fee=5063310` — 0.0506 ℏ, charged to the contract.
+
+The fix is three lines and one habit: `receive() external payable`, fund at construction, and
+`if (address(this).balance == 0) revert NotFunded()` so the contract refuses to schedule work
+it cannot pay for. The habit is to verify the transaction, never the schedule.
+
 **And one that is not ATS's fault but cost us an hour:**
 `maxAutomaticTokenAssociations = -1` means *unlimited auto-association slots*, **not**
 *pre-associated*. The Circle USDC faucet transfer is not eligible for auto-association, so
@@ -351,7 +473,7 @@ backend/src/
   chain/          ethers adapter for holds, balances, KYC, settlement
   hcs/            HCS audit writer
   rfq/            the RFQ state machine + 6 unit tests
-  scripts/        deploy, seed, settle, batch, failure, oracle, bond demos
+  scripts/        deploy, seed, settle, batch, failure, oracle, bond, redemption demos
   server.ts       the live API
 packages/shared/  the wire contract: types, EIP-712 domain, commit formula
 docs/             BLUEPRINT.md · MECHANICS.md · ATS-SPIKE.md
@@ -391,6 +513,8 @@ npx tsx backend/src/scripts/hcs-demo.ts           # audit trail
 npx tsx backend/src/scripts/failure-demo.ts       # KYC revoked → revert
 npx tsx backend/src/scripts/oracle-demo.ts        # off-market award refused
 npx tsx backend/src/scripts/bond-demo.ts          # reveal-or-forfeit
+npx tsx backend/src/scripts/redeem-demo.ts        # redemption at maturity
+npx tsx backend/src/scripts/schedule-redeem-demo.ts # the same, scheduled on-chain
 npx tsx backend/src/scripts/verify-sourcify.ts    # verify contracts
 ```
 

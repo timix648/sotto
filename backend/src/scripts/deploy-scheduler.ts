@@ -47,11 +47,19 @@ async function main() {
   // 1) Deploy
   const art = JSON.parse(readFileSync(ART, 'utf8'));
   const factory = new ethers.ContractFactory(art.abi, art.bytecode, issuer);
-  const c = await factory.deploy(issuer.address, { gasLimit: 4_000_000 });
+  // Fund at construction. THE SCHEDULING CONTRACT IS THE PAYER for every call
+  // it schedules - gas at execution time comes out of this balance, not out of
+  // whoever called scheduleCoupon. The first deployment of this contract had no
+  // receive() and a zero balance; its scheduled coupon fired on time and failed
+  // with INSUFFICIENT_PAYER_BALANCE, while the mirror node still reported the
+  // schedule as executed. Fund it, then check the transaction, not the schedule.
+  const FUND = ethers.parseEther('10');
+  const c = await factory.deploy(issuer.address, { gasLimit: 4_000_000, value: FUND });
   await c.waitForDeployment();
   const addr = await c.getAddress();
   console.log(`\n  SottoCouponScheduler ${addr}`);
   console.log(`  hashscan https://hashscan.io/testnet/contract/${addr}`);
+  console.log(`  gas budget ${ethers.formatEther(await p.getBalance(addr))} HBAR`);
   upsertEnv('SCHEDULER_ADDRESS', addr);
 
   // 2) Slot search through our own contract

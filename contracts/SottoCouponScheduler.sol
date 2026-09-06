@@ -56,13 +56,41 @@ contract SottoCouponScheduler is AccessControl {
     );
     event ScheduleDeleted(address indexed scheduleAddress, int64 responseCode);
 
+    event Funded(address indexed from, uint256 amount);
+    event Swept(address indexed to, uint256 amount);
+
     error NoCapacityWithinWindow(uint256 from, uint256 probes);
     error ScheduleFailed(int64 responseCode);
     error DateInPast(uint256 requested, uint256 nowTs);
+    error NotFunded();
+    error SweepFailed();
 
-    constructor(address admin) {
+    constructor(address admin) payable {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(SCHEDULER_ROLE, admin);
+    }
+
+    /**
+     * @notice Accept HBAR. THIS CONTRACT IS THE PAYER for every call it
+     *         schedules, so gas at execution time comes out of this balance -
+     *         not out of whoever called scheduleCoupon.
+     *
+     *         This is not theoretical. The first deployment of this contract had
+     *         no receive() and a zero balance. Its scheduled coupon fired on time
+     *         and failed with INSUFFICIENT_PAYER_BALANCE, and the mirror node
+     *         still reports the schedule as executed with a timestamp - so the
+     *         obvious check, "did executed_timestamp get set", says yes.
+     *         See README, "the coupon that fired and did nothing".
+     */
+    receive() external payable {
+        emit Funded(msg.sender, msg.value);
+    }
+
+    /// @notice Unspent gas budget is not the venue's money to strand.
+    function sweep(address payable to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        (bool ok, ) = to.call{ value: amount }("");
+        if (!ok) revert SweepFailed();
+        emit Swept(to, amount);
     }
 
     function scheduleCount() external view returns (uint256) {
@@ -123,6 +151,9 @@ contract SottoCouponScheduler is AccessControl {
         bool isMaturity
     ) private returns (address scheduleAddress) {
         if (date <= block.timestamp) revert DateInPast(date, block.timestamp);
+        // Refuse to schedule what we cannot pay for. HSS will happily create the
+        // schedule and it will simply fail to execute at the appointed second.
+        if (address(this).balance == 0) revert NotFunded();
 
         (uint256 slot, bool found) = findAvailableSecond(date, gasLimit);
         if (!found) revert NoCapacityWithinWindow(date, MAX_SLOT_PROBES);

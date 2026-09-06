@@ -80,12 +80,12 @@ async function main() {
       maxSupply: 1_000_000n,
       resolverProxyConfiguration: { key: configId, version: configVersion },
       erc20MetadataInfo: {
-        name: 'Sotto Demo Senior Note 2030',
-        symbol: 'STO-BOND-A',
+        name: process.env.BOND_NAME ?? 'Sotto Demo Senior Note 2030',
+        symbol: process.env.BOND_SYMBOL ?? 'STO-BOND-A',
         // ISIN is checksum-validated on-chain by isinValidator.sol (ISO 6166).
         // XS0000000001 REVERTS - the check digit must be 9. Verified: the same
         // algorithm reproduces Apple's real ISIN US0378331005.
-        isin: 'XS0000000009',
+        isin: process.env.BOND_ISIN ?? 'XS0000000009',
         decimals: 0,
       },
       rbacs: rbacFor(issuer.address),
@@ -106,8 +106,13 @@ async function main() {
       currency: '0x555344',            // "USD" as bytes3
       nominalValue: 1_000_000n,        // 1 USDC per unit at 6dp
       nominalValueDecimals: 6,
-      startingDate: BigInt(now + 300),
-      maturityDate: BigInt(Math.floor(Date.UTC(2030, 8, 5) / 1000)),
+      startingDate: BigInt(now + (process.env.BOND_MATURITY_SECS ? 30 : 300)),
+      // A short-dated bond is how redemption at maturity gets demonstrated:
+      // updateMaturityDate can only push maturity FORWARD (onlyAfterCurrent
+      // MaturityDate), so a 2030 bond can never be matured early.
+      maturityDate: process.env.BOND_MATURITY_SECS
+        ? BigInt(Math.floor(Date.now() / 1000) + Number(process.env.BOND_MATURITY_SECS))
+        : BigInt(Math.floor(Date.UTC(2030, 8, 5) / 1000)),
     },
     proceedRecipients: [],
     proceedRecipientsData: [],
@@ -144,11 +149,14 @@ async function main() {
   if (addr) {
     console.log(`  address ${addr}`);
     let env2 = readFileSync('.env', 'utf8');
-    env2 = env2.includes('BOND_ADDRESS=')
-      ? env2.replace(/^BOND_ADDRESS=.*$/m, `BOND_ADDRESS=${addr}`)
-      : env2 + `\nBOND_ADDRESS=${addr}\n`;
+    // Honour BOND_ENV_KEY. Without this a second bond overwrites BOND_ADDRESS,
+    // which is what happened the first time the short-dated note was deployed.
+    const key = process.env.BOND_ENV_KEY ?? 'BOND_ADDRESS';
+    env2 = new RegExp(`^${key}=`, 'm').test(env2)
+      ? env2.replace(new RegExp(`^${key}=.*$`, 'm'), `${key}=${addr}`)
+      : env2.replace(/\n*$/, '\n') + `${key}=${addr}\n`;
     writeFileSync('.env', env2, { mode: 0o600 });
-    console.log('  written to .env as BOND_ADDRESS');
+    console.log('  written to .env as ' + (process.env.BOND_ENV_KEY ?? 'BOND_ADDRESS'));
   }
   console.log('');
 }

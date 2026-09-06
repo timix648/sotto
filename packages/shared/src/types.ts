@@ -67,7 +67,9 @@ export interface Trade {                 // EIP-712 payload — MUST match Solid
 export type AuditKind =
   | 'RFQ_OPENED' | 'HOLD_PLACED' | 'QUOTE_COMMITTED' | 'WINDOW_CLOSED'
   | 'QUOTE_REVEALED' | 'REVEAL_FAILED' | 'AWARDED' | 'SETTLED'
-  | 'SETTLEMENT_REVERTED' | 'EXPIRED';
+  | 'SETTLEMENT_REVERTED' | 'EXPIRED'
+  // lifecycle, not trading: the bond matured and the holder was redeemed out
+  | 'REDEEMED';
 
 export interface AuditEvent {
   rfqId: string;

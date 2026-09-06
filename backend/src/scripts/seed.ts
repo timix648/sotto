@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 
 const RPC = process.env.JSON_RPC_URL ?? 'https://testnet.hashio.io/api';
 const PARTITION = '0x0000000000000000000000000000000000000000000000000000000000000001';
-const UNITS = 1000n;
+const UNITS = BigInt(process.env.SEED_UNITS ?? 1000);
 
 // ATS v3.1.0 role hashes (ad8f601, layer_1/constants/roles.sol).
 //

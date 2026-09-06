@@ -336,6 +336,86 @@ wants ("available drops, held rises, total does not move"), but it means a naive
 `Locked` is a separate concept with its own facet (`_LOCKER_ROLE`) and is not the
 same as held.
 
+## Redemption at maturity, and why maturity only moves forward
+
+`fullRedeemAtMaturity(address)` and `redeemAtMaturityByPartition(address,bytes32,uint256)`
+live on the `Bond` facet and burn the holder's units. Guards, in order:
+
+```
+onlyUnpaused · validateAddress · onlyListedAllowed(holder) ·
+onlyRole(_MATURITY_REDEEMER_ROLE) · onlyClearingDisabled ·
+onlyValidKycStatus(GRANTED, holder) · onlyUnrecoveredAddress(holder) ·
+onlyAfterCurrentMaturityDate(_blockTimestamp())
+```
+
+Two of those cost us time:
+
+**`_MATURITY_REDEEMER_ROLE` is not in the issuance `rbacs` array** and, like every
+other role, its v3.1.0 hash differs from HEAD's. Deployed value:
+
+| role | v3.1.0 hash (the one the deployed contract checks) |
+|---|---|
+| `_MATURITY_REDEEMER_ROLE` | `0xa0d696902e9ed231892dc96649f0c62b808a1cb9dd1269e78e0adc1cc4b8358c` |
+| `_BOND_MANAGER_ROLE` | `0x8e99f55d84328dd46dd7790df91f368b44ea448d246199c88b97896b3f83f65d` |
+
+Both are `keccak256('security.token.standard.role.maturity.redeemer')` and
+`keccak256('security.token.standard.role.bondManager')` — verified by recomputing
+them rather than trusting the source comment.
+
+**Maturity is a one-way ratchet.** `updateMaturityDate` carries
+`onlyAfterCurrentMaturityDate(_newMaturityDate)` — against the *new* date. So an
+issuer can extend a bond and can never pull one in. `_BOND_MANAGER_ROLE` does not
+help; nothing does.
+
+The practical consequence for a demo: **a 2030 bond can never be matured on
+camera.** Redemption has to run against a separately issued short-dated note
+(`STO-BOND-M`, ISIN `XS0000000025`), whose maturity is minutes rather than years.
+That is why `deploy-bond.ts` takes `BOND_MATURITY_SECS` and `BOND_ENV_KEY`, and
+why `startingDate` becomes relative when it does — a bond whose start is 300s out
+but whose maturity is 600s out is a valid instrument; one that matures before it
+starts is not.
+
+Early redemption reverts with `BondMaturityDateWrong()`, selector `0x67d08758`.
+`redeem-demo.ts` calls `fullRedeemAtMaturity.staticCall` before maturity
+specifically to show that revert, then waits and calls it for real.
+
+**`getPrincipalFor(address)` returns a `{numerator, denominator}` pair**, not an
+amount — `10000000 / 1000000` for 10 units of a bond with `nominalValue`
+`1_000_000` at 6 dp, i.e. 10.00 USD. It agrees with `units × nominalValue`, which
+is worth knowing because only one of the two is on-chain.
+
+**ATS burns units; it does not move money.** There is no cash leg inside
+`fullRedeemAtMaturity`. Principal is an ordinary transfer, and `redeem-demo.ts`
+pays it *before* burning: a holder who has not been paid still holds the claim.
+
+## HIP-1215: the scheduling contract is the payer
+
+A scheduled call's gas is charged to the **contract that scheduled it**, not to whoever called
+that contract. Our first `SottoCouponScheduler` had no `receive()` and a zero HBAR balance:
+
+| schedule | scheduler balance | `executed_timestamp` | transaction result |
+|---|---|---|---|
+| `0.0.10384068` | 0 ℏ | `1788647690.113138772` | `INSUFFICIENT_PAYER_BALANCE`, fee 0 |
+| `0.0.10390764` | 10 ℏ | `1788689033.172686419` | `SUCCESS`, fee 0.0506 ℏ |
+| `0.0.10390816` (the redemption) | ~9.95 ℏ | `1788689389.019494208` | `SUCCESS`, fee 0.1512 ℏ |
+
+**Both rows have an `executed_timestamp`.** The schedule record says nothing about whether the
+call did anything - it only says the network triggered it. Always resolve the timestamp against
+`/api/v1/transactions?timestamp=…` and read `result`.
+
+Fixes applied: `receive() external payable`, a payable constructor so it can be funded at
+deployment, `sweep()` so the budget is not stranded, and
+`if (address(this).balance == 0) revert NotFunded()` in `_schedule`.
+
+**`msg.sender` inside a scheduled call is the scheduling contract.** For a scheduled
+`fullRedeemAtMaturity`, `_MATURITY_REDEEMER_ROLE` must therefore be granted to
+`SottoCouponScheduler`'s address, not to an operator key. Nobody has to be online at maturity.
+
+**Schedule addresses are long-zero; contract addresses are not.** `MaturityScheduled` carries
+an address like `0x…009e8d20`, whose low 8 bytes are the entity num (`0.0.10390816`). A
+contract deployed over the JSON-RPC relay gets a keccak-derived address instead, and reading it
+as long-zero produces a 49-digit nonsense id - look it up on `/api/v1/contracts/{addr}`.
+
 ## Proven end to end on testnet
 
 | step | result |
@@ -345,6 +425,9 @@ same as held.
 | KYC granted, 1000 units issued to seller | ✅ |
 | **Atomic DvP: 20 units ↔ 19.67 real USDC** | tx `0x4c90cf5b…52fd`, gas 467,664 |
 | **KYC-revoked settlement reverts, both ledgers unchanged** | ✅ |
+| **Redemption at maturity** — 10 units burned, 10 USDC principal paid | tx `0xf8f9c267…f7c6e`, gas 144,046 |
+| **Early redemption refused** 711s before maturity | `BondMaturityDateWrong()` (`0x67d08758`) |
+| **Redemption executed by a HIP-1215 schedule, paid by the contract** | schedule `0.0.10390816`, `SUCCESS`, 0.1512 ℏ |
 
 The failure demo is sized so the cash leg *would* succeed (0.30 USDC notional
 against a 0.33 USDC balance and a sufficient allowance), so the revert is
