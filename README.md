@@ -18,17 +18,28 @@ auditable without being transparent while the auction is live.
 
 | | |
 |---|---|
-| Bond (ATS diamond) | [`0xD53072649037FEecD305920087791a37dF8D517F`](https://hashscan.io/testnet/contract/0xD53072649037FEecD305920087791a37dF8D517F) |
-| SottoSettlement | [`0x98164562Ac1A7005C5E0e00C1018669fc62843E8`](https://hashscan.io/testnet/contract/0x98164562Ac1A7005C5E0e00C1018669fc62843E8) |
+| Bond — `STO-BOND-A` | [`0xD53072649037FEecD305920087791a37dF8D517F`](https://hashscan.io/testnet/contract/0xD53072649037FEecD305920087791a37dF8D517F) |
+| Equity — `STO-EQ-A` | [`0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0`](https://hashscan.io/testnet/contract/0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0) |
+| SottoSettlement | [`0x73195C1f91899Bc1E822bb1D039033Eb38926931`](https://hashscan.io/testnet/contract/0x73195C1f91899Bc1E822bb1D039033Eb38926931) |
+| SottoNavOracle | [`0xe8E7c39ba776C3B0778BE4571e72F5669f662c04`](https://hashscan.io/testnet/contract/0xe8E7c39ba776C3B0778BE4571e72F5669f662c04) |
+| SottoDealerBond | [`0x192565BD006c559afFe12B4eAD0Cd749581702aF`](https://hashscan.io/testnet/contract/0x192565BD006c559afFe12B4eAD0Cd749581702aF) |
 | SottoCouponScheduler | [`0xb97BF0203d5C914d40100C12683B2ed257E9cEec`](https://hashscan.io/testnet/contract/0xb97BF0203d5C914d40100C12683B2ed257E9cEec) |
 | HCS audit topic | [`0.0.10383803`](https://hashscan.io/testnet/topic/0.0.10383803) |
 | Cash leg | **real Circle USDC** `0.0.429274` |
+
+All four Sotto contracts are verified on Sourcify as **`exact_match`**, which HashScan reads
+automatically. An earlier unguarded settlement remains live at
+[`0x9816…43E8`](https://hashscan.io/testnet/contract/0x98164562Ac1A7005C5E0e00C1018669fc62843E8)
+— holds escrowed to it are still valid there; new trades use the guarded one above.
 
 **Proven transactions, not screenshots:**
 
 - Atomic DvP — [`0x4c90cf5b…52fd`](https://hashscan.io/testnet/transaction/0x4c90cf5b62ed65ebdabb7621bb76c80596cd78dc29cf2303c68b3ccbcab552fd) — 20 bonds ↔ 19.67 USDC, both legs, one transaction
 - HIP-551 atomic batch — `0.0.10380177@1788646998.050909150` — three records, all SUCCESS
 - HIP-1215 scheduled coupon — schedule `0.0.10384068`, created by the contract itself
+- **Security for security** — [`0x320fdef2…a1fb`](https://hashscan.io/testnet/transaction/0x320fdef2aacea95585bfaa7479a0e1fccc0e291ac03094218edb7cea22f5a1fb) — 10 bonds ↔ 12 shares, **no stablecoin in the trade**
+- **Off-market award refused** — an 80.00 bid against a 98.35 NAV reverted with both ledgers unchanged; 98.35 settled in [`0x35d42fb4…8997`](https://hashscan.io/testnet/transaction/0x35d42fb4df4644771020f9118bd8e4e5a5f149c1698e27dbebb3d17e8fec8997)
+- **Dealer bond slashed by the seller** — [`0xf4d5a59b…6677`](https://hashscan.io/testnet/transaction/0xf4d5a59ba1d91f64d25457b71972d78f20272c5b92fec53044490853b6116677) — seller +2.00 USDC, venue +0.00
 
 Nothing here is mocked, and nothing was minted for convenience: the bond is issued from
 Hedera's own deployed ATS factory `0.0.7708432`, and the cash leg is real Circle USDC.

@@ -662,7 +662,10 @@ The cash leg settles in **Circle's actual USDC on Hedera testnet: token `0.0.429
 | | |
 |---|---|
 | Bond `STO-BOND-A` | `0xD53072649037FEecD305920087791a37dF8D517F` |
-| SottoSettlement | `0x98164562Ac1A7005C5E0e00C1018669fc62843E8` (Sourcify `exact_match`) |
+| Equity `STO-EQ-A` | `0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0` |
+| SottoSettlement | `0x73195C1f91899Bc1E822bb1D039033Eb38926931` (Sourcify `exact_match`) |
+| SottoNavOracle | `0xe8E7c39ba776C3B0778BE4571e72F5669f662c04` |
+| SottoDealerBond | `0x192565BD006c559afFe12B4eAD0Cd749581702aF` |
 | SottoCouponScheduler | `0xb97BF0203d5C914d40100C12683B2ed257E9cEec` |
 | HCS audit topic | `0.0.10383803` |
 | Cash | real Circle USDC `0.0.429274`, EVM `0x0000000000000000000000000000000000068cDa`, **6 dp** |
