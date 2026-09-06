@@ -65,9 +65,13 @@ async function main() {
   const env = loadEnv();
   const provider = new ethers.JsonRpcProvider(RPC);
   const issuer = new ethers.Wallet(env.ISSUER_PRIVATE_KEY, provider);
-  const bond = new ethers.Contract(env.BOND_ADDRESS, BOND_ABI, issuer);
+  // Works for any ATS security - bond or equity. Pass an address, or a name.
+  const argAddr = process.argv.find(a => a.startsWith('0x') && a.length === 42);
+  const which = process.argv.includes('equity') ? env.EQUITY_ADDRESS : env.BOND_ADDRESS;
+  const tokenAddress = argAddr ?? which;
+  const bond = new ethers.Contract(tokenAddress, BOND_ABI, issuer);
 
-  console.log(`\n  bond   ${env.BOND_ADDRESS}`);
+  console.log(`\n  token  ${tokenAddress}`);
   console.log(`  issuer ${issuer.address}\n`);
 
   const parties: [string, string][] = [
