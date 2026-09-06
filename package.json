@@ -9,7 +9,8 @@
     "mock": "tsx backend/src/mock/server.ts",
     "build": "hardhat compile",
     "test": "hardhat test",
-    "serve": "tsx backend/src/server.ts"
+    "serve": "tsx backend/src/server.ts",
+    "test:engine": "tsx --test backend/src/rfq/engine.test.ts"
   },
   "dependencies": {
     "@fastify/websocket": "^11.3.0",

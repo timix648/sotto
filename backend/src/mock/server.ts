@@ -139,6 +139,7 @@ function startCycle() {
     const r: QuoteReveal = {
       rfqId: c.rfq.id, dealer: d.addr, price: d.price,
       nonce: c.nonces[d.addr], valid: true, revealedAt: now(),
+      validUntil: now() + 1800, // 30 min firmness, as the engine defaults to
     };
     c.reveals.push(r);
     audit(c, 'QUOTE_REVEALED', { dealer: d.addr, price: d.price, valid: true });
@@ -296,6 +297,7 @@ app.post('/api/rfq/:id/reveal', async (req, reply) => {
   const r: QuoteReveal = {
     rfqId: c.rfq.id, dealer: b.dealer, price: String(b.price),
     nonce: b.nonce, valid, revealedAt: now(),
+    validUntil: now() + Number(b.firmnessSecs ?? 1800),
   };
   c.reveals.push(r);
   audit(c, valid ? 'QUOTE_REVEALED' : 'REVEAL_FAILED', { dealer: b.dealer, price: r.price, valid });

@@ -166,7 +166,7 @@ app.post('/api/rfq/:id/close', async (req) => {
 app.post('/api/rfq/:id/reveal', async (req) => {
   const { id } = req.params as { id: string };
   const b = (req.body ?? {}) as Record<string, string>;
-  const r = await engine.reveal(id, b.dealer, b.price, b.nonce as `0x${string}`);
+  const r = await engine.reveal(id, b.dealer, b.price, b.nonce as `0x${string}`, b.firmnessSecs ? Number(b.firmnessSecs) : undefined);
   broadcast({ type: 'quote.revealed', rfqId: id, dealer: r.dealer, price: r.price, valid: r.valid }, id);
   return r;
 });

@@ -34,6 +34,20 @@ export interface QuoteReveal {
   nonce: string;                 // 0x… bytes32
   valid: boolean;                // did it match the commit?
   revealedAt: number;
+  /**
+   * How long this dealer's price stays FIRM, as a unix second, measured from
+   * the reveal's own HCS consensus timestamp.
+   *
+   * This is the dealer's commitment, NOT the RFQ's close time. MECHANICS 2 and
+   * 4: Umbra originally let firmness inherit the request's close time, which
+   * silently committed a dealer to holding a price for a full day once long
+   * requests became possible. Firmness is capped independently here for the
+   * same reason.
+   *
+   * Without it a seller can sit on a revealed price and lift it after the
+   * market moves - a free option the dealer never agreed to write.
+   */
+  validUntil: number;
 }
 
 export interface Trade {                 // EIP-712 payload — MUST match Solidity struct

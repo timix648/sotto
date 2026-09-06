@@ -19,6 +19,21 @@ import type {
 import { computeCommit } from '../../../packages/shared/src/commit.js';
 import { rfqIdToBytes32 } from '../../../packages/shared/src/rfq-id.js';
 
+/**
+ * Default quote firmness: 30 minutes.
+ *
+ * MECHANICS 4: Umbra capped firmness at 30 minutes by default AFTER discovering
+ * that inheriting the RFQ close time silently committed a dealer to holding a
+ * price for a whole day once long requests became possible. Same default, same
+ * reason - it is the dealer's exposure, so it must not scale with the seller's
+ * chosen window.
+ */
+export const DEFAULT_FIRMNESS_SECS = 30 * 60;
+export const MAX_FIRMNESS_SECS = 24 * 60 * 60;
+
+/** Slack after revealDeadline in which an award may still be made. */
+export const AWARD_GRACE_SECS = 5 * 60;
+
 export class RfqError extends Error {
   constructor(readonly code: ErrorCode, message: string, readonly detail: Record<string, unknown> = {}) {
     super(message);
@@ -166,7 +181,13 @@ export class RfqEngine {
    * reveal forfeits - which is what MECHANICS 4.10 calls the reveal-loss
    * failure, and why the UI must persist the nonce.
    */
-  async reveal(id: string, dealer: string, price: string, nonce: `0x${string}`): Promise<QuoteReveal> {
+  async reveal(
+    id: string,
+    dealer: string,
+    price: string,
+    nonce: `0x${string}`,
+    firmnessSecs = DEFAULT_FIRMNESS_SECS
+  ): Promise<QuoteReveal> {
     const r = this.get(id);
     if (r.rfq.status !== 'REVEALING') {
       throw new RfqError('REVEAL_WINDOW_CLOSED', 'not in the reveal window', { status: r.rfq.status });
@@ -180,9 +201,24 @@ export class RfqEngine {
     const e = await this.audit(id, valid ? 'QUOTE_REVEALED' : 'REVEAL_FAILED', { dealer, price, valid });
     r.audit.push(e);
 
+    // Symmetric with commit(): the reveal window closes on CONSENSUS time, not
+    // on our clock. Previously only commit() checked this, so a late reveal was
+    // accepted purely because the status had not been flipped yet.
+    const consensusAt = consensusSeconds(e);
+    if (consensusAt > r.rfq.revealDeadline) {
+      throw new RfqError('REVEAL_WINDOW_CLOSED', 'consensus timestamp is past the reveal deadline', {
+        consensusTimestamp: e.consensusTimestamp,
+        revealDeadline: r.rfq.revealDeadline,
+      });
+    }
+
+    // Firmness runs from the reveal's own consensus timestamp and is capped
+    // independently of the RFQ window.
+    const firmness = Math.min(Math.max(firmnessSecs, 0), MAX_FIRMNESS_SECS);
     const rev: QuoteReveal = {
       rfqId: id, dealer, price, nonce, valid,
       revealedAt: Math.floor(Date.now() / 1000),
+      validUntil: consensusAt + firmness,
     };
     r.reveals.push(rev);
 
@@ -201,11 +237,38 @@ export class RfqEngine {
     if (r.rfq.status !== 'REVEALING') {
       throw new RfqError('REVEAL_WINDOW_CLOSED', 'not awardable in this state', { status: r.rfq.status });
     }
-    const valid = r.reveals.filter(v => v.valid);
-    if (valid.length === 0) {
+    const now = Math.floor(Date.now() / 1000);
+
+    // The award window itself is bounded. An RFQ must not sit in REVEALING for
+    // ever, silently holding every dealer's price hostage.
+    if (now > r.rfq.revealDeadline + AWARD_GRACE_SECS) {
+      r.audit.push(await this.audit(id, 'EXPIRED', { reason: 'award window closed' }));
+      r.rfq.status = 'EXPIRED';
+      throw new RfqError('REVEAL_WINDOW_CLOSED', 'the award window has closed', {
+        revealDeadline: r.rfq.revealDeadline,
+      });
+    }
+
+    const allValid = r.reveals.filter(v => v.valid);
+    if (allValid.length === 0) {
       r.audit.push(await this.audit(id, 'EXPIRED', { reason: 'no valid reveals' }));
       r.rfq.status = 'EXPIRED';
       throw new RfqError('COMMIT_MISMATCH', 'no valid revealed quotes');
+    }
+
+    // A price that is no longer firm cannot be lifted. Otherwise the seller
+    // holds a free option: watch the market, then award a stale quote.
+    const valid = allValid.filter(v => v.validUntil > now);
+    if (valid.length === 0) {
+      r.audit.push(await this.audit(id, 'EXPIRED', {
+        reason: 'every revealed quote is stale',
+        latestValidUntil: Math.max(...allValid.map(v => v.validUntil)),
+      }));
+      r.rfq.status = 'EXPIRED';
+      throw new RfqError('REVEAL_WINDOW_CLOSED', 'no quote is still firm', {
+        now,
+        latestValidUntil: Math.max(...allValid.map(v => v.validUntil)),
+      });
     }
 
     const seqOf = (dealer: string) =>
@@ -229,7 +292,11 @@ export class RfqEngine {
       buyer: best.dealer,
       quantity: r.rfq.quantity,
       notional: notional.toString(),
-      deadline: String(Math.floor(Date.now() / 1000) + deadlineSecs),
+      // The dealer's firmness BOUNDS the settlement deadline. This is what makes
+      // firmness binding rather than advisory: Trade.deadline is enforced
+      // on-chain by SottoSettlement (DeadlineExpired), so a settlement attempted
+      // after the quote goes stale reverts on the chain, not just in our engine.
+      deadline: String(Math.min(best.validUntil, now + deadlineSecs)),
       nonce: '0',
     };
 
