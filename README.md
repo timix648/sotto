@@ -29,6 +29,8 @@ untouched.
 - [Two settlement paths](#two-settlement-paths)
 - [What makes this a venue and not a swap](#what-makes-this-a-venue-and-not-a-swap)
 - [The bond lifecycle, all of it on-chain](#the-bond-lifecycle-all-of-it-on-chain)
+- [Partial fills](#partial-fills)
+- [The price source is real now](#the-price-source-is-real-now)
 - [Known limitations](#known-limitations)
 - [What we learned about ATS that is not in the docs](#what-we-learned-about-ats-that-is-not-in-the-docs)
 - [Architecture](#architecture)
@@ -49,12 +51,13 @@ Cash is **real Circle USDC**. Nothing was minted for convenience.
 | Short note — `STO-BOND-M` (matures in minutes, for the redemption demo) | [`0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14`](https://hashscan.io/testnet/contract/0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14) |
 | `SottoSettlement` | [`0x73195C1f91899Bc1E822bb1D039033Eb38926931`](https://hashscan.io/testnet/contract/0x73195C1f91899Bc1E822bb1D039033Eb38926931) |
 | `SottoNavOracle` | [`0xe8E7c39ba776C3B0778BE4571e72F5669f662c04`](https://hashscan.io/testnet/contract/0xe8E7c39ba776C3B0778BE4571e72F5669f662c04) |
-| `SottoDealerBond` | [`0x192565BD006c559afFe12B4eAD0Cd749581702aF`](https://hashscan.io/testnet/contract/0x192565BD006c559afFe12B4eAD0Cd749581702aF) |
+| `SottoDealerBond` | [`0xea7545EC3C5E74e0A44f8c289a657b6D849227E5`](https://hashscan.io/testnet/contract/0xea7545EC3C5E74e0A44f8c289a657b6D849227E5) |
+| `ChainlinkPriceSource` | [`0xFb321627eC70D7E86D82F80553dC2eC98BEb124a`](https://hashscan.io/testnet/contract/0xFb321627eC70D7E86D82F80553dC2eC98BEb124a) |
 | `SottoCouponScheduler` | [`0xe23f19786E146fADdBd6b3EEa9994e9feC0cf847`](https://hashscan.io/testnet/contract/0xe23f19786E146fADdBd6b3EEa9994e9feC0cf847) |
 | HCS audit topic | [`0.0.10383803`](https://hashscan.io/testnet/topic/0.0.10383803) |
 | Cash | Circle USDC `0.0.429274` · EVM `0x…068cDa` · 6 dp |
 
-**All four Sotto contracts are verified on Sourcify as `exact_match`**, which HashScan reads
+**All five Sotto contracts are verified on Sourcify as `exact_match`**, which HashScan reads
 automatically. The source you are reading is the bytecode that ran.
 
 ### Proven on-chain, not asserted
@@ -70,6 +73,9 @@ automatically. The source you are reading is the bytecode that ran.
 | **Early redemption refused by the chain** — `BondMaturityDateWrong()`, 711s before maturity | see [Verify it yourself](#verify-it-yourself) |
 | **Compliance failure** — KYC revoked → settlement reverts, both ledgers unchanged | see [Verify it yourself](#verify-it-yourself) |
 | **Off-market award refused** — 80.00 bid against a 98.35 NAV rejected on-chain | fair price settled in [`0x35d42fb4…8997`](https://hashscan.io/testnet/transaction/0x35d42fb4df4644771020f9118bd8e4e5a5f149c1698e27dbebb3d17e8fec8997) |
+| **Partial fill** — one 12-unit block split 5 + 5 across two dealers at two prices, against a SINGLE hold | [`0xb8243847…13a2`](https://hashscan.io/testnet/transaction/0xb824384746ecb7a09e6e97f85c00a11fa4a9e95fd197ca958b5f472fb5ed13a2) · [`0x14fca86b…2f06`](https://hashscan.io/testnet/transaction/0x14fca86b3f75fc8ce07528f07a4d33e7b63f144e7df8e47db6b1225d9f1d2f06) |
+| **All-or-none dealer skipped**, and the 2 unsold units released back to the seller | [`0xc3f72483…9d82c`](https://hashscan.io/testnet/transaction/0xc3f724832b172e474422cefb99e614f0e171fdcc942f707d47cd9ceaee89d82c) |
+| **Chainlink prices a Sotto asset** — `SottoNavOracle.referenceFor` reads a live aggregator, and the deployed settlement band check consumes it | aggregator [`0x59bC155E…2B4a`](https://hashscan.io/testnet/contract/0x59bC155EB6c6C415fE43255aF66EcF0523c92B4a) |
 | **Dealer bond slashed** — to the seller, by the seller, venue gains nothing | [`0xf4d5a59b…6677`](https://hashscan.io/testnet/transaction/0xf4d5a59ba1d91f64d25457b71972d78f20272c5b92fec53044490853b6116677) |
 
 ---
@@ -322,6 +328,128 @@ Two things had to be right for that to work, and both are easy to get wrong:
 
 ---
 
+## Partial fills
+
+A seller with 1,000 bonds rarely finds one dealer who wants all 1,000 at a good price. Forcing
+one dealer to price the whole block means paying them to warehouse it. Splitting the block
+across the best few bids gets the seller a better average and gets each dealer a size it
+actually wants. This was the last item on the Known limitations list; it is now the mechanism.
+
+**One hold, several buyers.** The seller escrows the block **once**. ATS decrements a hold on
+each `executeHoldByPartition` and only removes it at zero, so a single escrow serves as many
+dealers as the book supports. `SottoSettlement` needed no change for this — `_checkHold` has
+always required `amount >= quantity`, not `==`. Two things did have to be right: the hold is
+created with `to = address(0)` (a hold pinned to one buyer can only ever be executed to that
+buyer), and every fill carries its **own nonce**, because a nonce is marked used for both
+parties and a reused one makes the second fill revert as a replay.
+
+**The dealer commits to a size, not just a price.** The commit has always been
+`keccak256(price, quantity, nonce, dealer)`, but `SottoDealerBond` recomputed it using the
+*auction's* quantity — which made every sealed bid implicitly all-or-nothing for the whole
+block. It now takes the dealer's own size, so a bid for part of a block is expressible and is
+still sealed: nobody can re-size after seeing the book. A bid larger than the block is refused
+rather than truncated, on-chain and in the engine, because a dealer who thinks they bought
+size that was never on offer has a position they did not intend.
+
+**Allocation is strict price priority.** Walk the valid, still-firm quotes from the best price
+down; each dealer takes the smaller of what they asked for and what is left. Equal prices are
+ordered by HCS sequence number — consensus order, not arrival order at our server.
+
+A seller could sometimes do better by skipping a dealer to reach a larger one behind them, and
+a venue that did that would be choosing winners on a rule nobody can check. Price priority is
+verifiable by every dealer against the public audit trail after the fact: if you were skipped,
+either someone bid better, or you refused the size on offer. That is worth more than the last
+basis point.
+
+**All-or-none is respected.** A quote carries `minQuantity`. A dealer bidding 600 all-or-none
+is passed over when only 400 remain, and the 400 goes to the next price. Real desks refuse odd
+lots; a venue that silently hands them one is not usable.
+
+**Each dealer pays its own price.** Never a uniform clearing price. MECHANICS §3.14 — a
+uniform price silently transfers value between dealers who never agreed to it, and the losing
+side finds out from their P&L.
+
+### One run, on testnet
+
+```
+block 12 units, one hold (holdId 14), escrow = SottoSettlement, to = 0x0
+
+  dealer A   98.4000 for 5
+  dealer B   98.2000 for 5
+  dealer C   98.1000 for 6   ALL-OR-NONE
+
+  A   5 @ 98.4000 = 4.920000 USDC   nonce 2    hold 12 -> 7
+  B   5 @ 98.2000 = 4.910000 USDC   nonce 3    hold  7 -> 2
+  C   SKIPPED - wanted 6 all-or-none, and 2 was left
+  filled 10 of 12, unfilled 2 -> released back to the seller
+
+  seller cash 59.373000 -> 69.203000 USDC
+  invariant: proceeds == sum of each dealer's OWN price -> HOLDS (9.830000)
+```
+
+The unfilled 2 are not swept under the rug. A block that does not fill is a normal outcome,
+and `Rfq.filled` / `Rfq.unfilled` say so — a seller who believes they sold 12 and actually
+sold 10 has an unhedged position.
+
+```bash
+npx tsx backend/src/scripts/partial-fill-demo.ts
+```
+
+---
+
+## The price source is real now
+
+A tokenised bond's NAV is not on a price feed. It comes from the issuer or a fund
+administrator, exactly as it does in traditional markets, so `SottoNavOracle`'s primary path
+is a signed publication by an accountable `NAV_PUBLISHER` with a staleness bound. That has not
+changed and should not.
+
+But the `IPriceSource` seam was, until now, only a claim. It is now a deployed contract
+reading live Chainlink aggregators on Hedera testnet:
+
+| pair | aggregator | answer | round age when probed |
+|---|---|---|---|
+| HBAR/USD | `0x59bC155EB6c6C415fE43255aF66EcF0523c92B4a` | 0.077580 | 0.3h |
+| USDC/USD | `0xb632a7e7e02d76c0Ce99d9C62c7a2d1B5F92B6B5` | 0.999920 | 21.3h |
+| BTC/USD | `0x058fE79CB5775d4b167920Ca6036B824805A9ABd` | 78450.484003 | 0.1h |
+
+(ETH, LINK, DAI and USDT are live too; `deploy-price-source.ts` probes all seven and prints
+them before it wires anything.)
+
+`SottoNavOracle.setPriceSource(asset, source)` already existed on the **deployed** oracle, and
+`referenceFor` prefers a configured source over the published NAV. So after wiring, the
+**already-deployed** `SottoSettlement`'s band check prices that asset from Chainlink with no
+change to the settlement contract at all. That is what a seam is supposed to buy you.
+
+**Three things the adapter has to get right, and none of them fail loudly:**
+
+- **Units.** A Chainlink answer is USD per unit at the feed's decimals (8 here). Sotto quotes
+  securities per **100 nominal** in the cash token's decimals (6). Getting that wrong silently
+  widens or narrows the band. The conversion is written on the feed record —
+  `out = answer · 10^outDecimals / 10^feedDecimals · mulNum / mulDen` — not inferred.
+- **Staleness, per feed.** Chainlink heartbeats differ, and on testnet they differ *a lot*: we
+  measured HBAR/USD at 0.3h old next to USDC/USD at 21.3h in the same second. One global
+  `maxAge` either rejects healthy feeds or accepts dead ones, so each feed carries its own
+  bound and a read past it reverts.
+- **Refusing, not guessing.** A non-positive answer, a zero `updatedAt`, an unregistered asset
+  or a stale round all revert. A band check that cannot get a price must refuse the trade.
+
+**Which asset, honestly.** `STO-EQ-A` is a demo equity with no listing and therefore no feed
+of its own, and there is no honest way to pretend otherwise. What the wiring demonstrates is
+the *path* — registered feed, real answer, unit conversion, staleness bound, band check
+consuming it. For a genuinely listed security you register that security's feed and change
+nothing else. The bond keeps its administrator NAV, which is where a bond's NAV comes from.
+
+Hedera's Exchange Rate contract at `0x168` is still **not** used. Its own documentation says
+it "should not be treated as a live price oracle" — it is the HBAR/USD rate the network uses
+to charge fees.
+
+```bash
+npx tsx backend/src/scripts/deploy-price-source.ts
+```
+
+---
+
 ## Known limitations
 
 We would rather write these down than have you find them.
@@ -343,15 +471,20 @@ permissioned one.** That is a real cost of Path B.
 - The ATS SDK has **no server-key path** — `SupportedWallets.CLIENT` is commented out and the
   only headless options are custodial. Sotto therefore calls `Factory.deployBond` directly
   with ethers rather than through the SDK.
-- The NAV reference is published by an accountable publisher with a staleness bound, not read
-  from a market feed. A bond's NAV is not on a crypto price oracle; it comes from an
-  administrator, as it does in traditional markets. An `IPriceSource` seam exists for assets
-  that *do* have a market price — Chainlink, Pyth and Supra are all live on Hedera.
+- A bond's NAV is published by an accountable administrator with a staleness bound, because
+  that is where a bond's NAV comes from — it is not on a crypto price feed and never will be.
+  For assets that *do* have a public price, `ChainlinkPriceSource` is deployed and wired: see
+  [The price source is real now](#the-price-source-is-real-now).
 - Hedera's Exchange Rate contract at `0x168` is **not** used as a price source. Its own
   documentation says it "should not be treated as a live price oracle" — it is the HBAR/USD
   rate the network uses to charge fees.
-- Partial fills are not supported; a block is awarded whole. Real desks split blocks, and this
-  is the most obvious next mechanism.
+- Partial fills allocate on **strict price priority** with all-or-none respected. There is no
+  pro-rata tier and no size priority. Both are defensible rules; price priority is the one a
+  skipped dealer can verify for themselves against the public audit trail, which is why it is
+  the one implemented.
+- A dealer's `minQuantity` is not bound into the commit hash. Misstating it can only shrink
+  that dealer's own allocation, and binding it would have forced a fourth field into a commit
+  formula already deployed on-chain.
 - Testnet resets periodically; balances are re-funded from the Circle and Hedera faucets.
 - **There is no admin function anywhere in `SottoSettlement` that can move user funds.**
   `RELAYER_ROLE` gates `deliver()`. `setNavOracle` can only cause trades to be *refused*, never
@@ -400,6 +533,16 @@ reason it is repairable without redeploying.
 - Hedera's published ATS documentation contains no contract API at all — the word "facet" does
   not appear. The source is the only authority.
 
+### `approve(spender, MaxUint256)` reverts on an HTS token
+
+The ERC-20 idiom for "approve once, forever" is `approve(spender, 2**256 - 1)`. On an HTS
+token's ERC-20 facade that reverts — **HTS amounts are `int64`**, so the unlimited allowance
+overflows. There is no reason string. The transaction burns ~985,000 gas and comes back with
+`status: 0`, which reads exactly like an out-of-gas failure and sent us to raise the gas limit
+first.
+
+Approve the exact notional instead. Every settlement in this repo does.
+
 ### The coupon that fired and did nothing
 
 Worth its own heading, because the failure is invisible from the obvious place to look.
@@ -446,7 +589,7 @@ transaction — and it still burns the faucet's 2-hour window.
                │ EIP-712 signing in-browser (wagmi/viem)
 ┌──────────────▼───────────────────────────────────────────────────────┐
 │  BACKEND (Node 20, TypeScript, Fastify)                               │
-│  RFQ engine   commit → reveal → award, on CONSENSUS time              │
+│  RFQ engine   commit → reveal → allocate, on CONSENSUS time           │
 │  HCS writer   every lifecycle event, sequence-numbered                │
 │  Chain adapter  holds, balances, KYC, settlement                      │
 │  Mirror poller  reconciles Settled events                             │
@@ -458,6 +601,7 @@ transaction — and it still burns the faucet's 2-hour window.
 │  SottoNavOracle       reference NAV + band, pluggable market source   │
 │  SottoDealerBond      reveal-or-forfeit staking                       │
 │  SottoCouponScheduler HIP-1215 on-chain lifecycle automation          │
+│  ChainlinkPriceSource live aggregators behind the NAV oracle's seam   │
 └──────────────┬───────────────────────────────────────────────────────┘
                │
 ┌──────────────▼───────────────────────────────────────────────────────┐
@@ -468,12 +612,13 @@ transaction — and it still burns the faucet's 2-hour window.
 ```
 
 ```
-contracts/        4 contracts, interfaces, mocks, 23 tests
+contracts/        5 contracts, interfaces, mocks, 32 tests
 backend/src/
   chain/          ethers adapter for holds, balances, KYC, settlement
   hcs/            HCS audit writer
-  rfq/            the RFQ state machine + 6 unit tests
-  scripts/        deploy, seed, settle, batch, failure, oracle, bond, redemption demos
+  rfq/            the RFQ state machine + allocator, 14 unit tests
+  scripts/        deploy, seed, settle, batch, failure, oracle, bond,
+                  redemption, partial-fill and price-source demos
   server.ts       the live API
 packages/shared/  the wire contract: types, EIP-712 domain, commit formula
 docs/             BLUEPRINT.md · MECHANICS.md · ATS-SPIKE.md
@@ -491,8 +636,8 @@ disagree about what was signed.
 npm install
 cp .env.example .env      # public addresses are pre-filled; add your keys
 npm run build             # hardhat compile
-npm test                  # 23 contract tests
-npm run test:engine       # 6 RFQ engine tests
+npm test                  # 32 contract tests
+npm run test:engine       # 14 RFQ engine tests
 npm run serve             # the live API against testnet, port 4000
 ```
 
@@ -515,6 +660,8 @@ npx tsx backend/src/scripts/oracle-demo.ts        # off-market award refused
 npx tsx backend/src/scripts/bond-demo.ts          # reveal-or-forfeit
 npx tsx backend/src/scripts/redeem-demo.ts        # redemption at maturity
 npx tsx backend/src/scripts/schedule-redeem-demo.ts # the same, scheduled on-chain
+npx tsx backend/src/scripts/partial-fill-demo.ts   # one block, several dealers
+npx tsx backend/src/scripts/deploy-price-source.ts # live Chainlink feeds -> NAV oracle
 npx tsx backend/src/scripts/verify-sourcify.ts    # verify contracts
 ```
 

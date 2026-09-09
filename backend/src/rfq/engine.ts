@@ -14,7 +14,7 @@
 //     rival's, and that only holds if commit->reveal binding is exact.
 import { randomUUID } from 'node:crypto';
 import type {
-  Rfq, RfqStatus, QuoteCommit, QuoteReveal, Trade, AuditEvent, AuditKind, ErrorCode,
+  Rfq, RfqStatus, QuoteCommit, QuoteReveal, Trade, Fill, AuditEvent, AuditKind, ErrorCode,
 } from '../../../packages/shared/src/types.js';
 import { computeCommit } from '../../../packages/shared/src/commit.js';
 import { rfqIdToBytes32 } from '../../../packages/shared/src/rfq-id.js';
@@ -52,7 +52,12 @@ export interface RfqRecord {
   commits: QuoteCommit[];
   reveals: QuoteReveal[];
   audit: AuditEvent[];
+  /**
+   * The best single slice, kept so a consumer that only knows about whole-block
+   * awards still reads the right dealer and price. `fills` is the truth.
+   */
   award: { dealer: string; trade: Trade } | null;
+  fills: Fill[];
 }
 
 export interface OpenParams {
@@ -94,6 +99,7 @@ export class RfqEngine {
       commits: r.commits,
       reveals: sealed ? [] : r.reveals,
       award: r.award,
+      fills: r.fills,
       audit: r.audit,
     };
   }
@@ -115,8 +121,10 @@ export class RfqEngine {
       status: 'OPEN',
       createdAt,
       hcsSequenceNumber: null,
+      filled: '0',
+      unfilled: p.quantity,
     };
-    const rec: RfqRecord = { rfq, commits: [], reveals: [], audit: [], award: null };
+    const rec: RfqRecord = { rfq, commits: [], reveals: [], audit: [], award: null, fills: [] };
     this.records.set(id, rec);
 
     const e = await this.audit(id, 'RFQ_OPENED', { assetSymbol: p.assetSymbol, quantity: p.quantity, seller: p.seller });
@@ -186,7 +194,15 @@ export class RfqEngine {
     dealer: string,
     price: string,
     nonce: `0x${string}`,
-    firmnessSecs = DEFAULT_FIRMNESS_SECS
+    firmnessSecs = DEFAULT_FIRMNESS_SECS,
+    /**
+     * The dealer's bid size. Defaults to the whole block, which is what every
+     * quote was before partial fills existed - so an existing caller that omits
+     * it keeps the old behaviour exactly.
+     */
+    quantity?: string,
+    /** Smallest acceptable fill. Equal to `quantity` = all-or-none. */
+    minQuantity?: string
   ): Promise<QuoteReveal> {
     const r = this.get(id);
     if (r.rfq.status !== 'REVEALING') {
@@ -195,10 +211,33 @@ export class RfqEngine {
     const commit = r.commits.find(c => sameAddr(c.dealer, dealer));
     if (!commit) throw new RfqError('COMMIT_MISMATCH', 'no commit from this dealer');
 
-    const expected = computeCommit(BigInt(price), BigInt(r.rfq.quantity), nonce, dealer as `0x${string}`);
+    const block = BigInt(r.rfq.quantity);
+    const bid = quantity === undefined ? block : BigInt(quantity);
+    // Refuse rather than truncate. A dealer who believes they bought more than
+    // the block exists has a position they did not intend, and finding out at
+    // settlement is far worse than finding out here. Mirrors the on-chain
+    // InvalidQuantity check in SottoDealerBond.revealAndRelease.
+    if (bid <= 0n || bid > block) {
+      throw new RfqError('COMMIT_MISMATCH', 'bid quantity must be between 1 and the block size', {
+        quantity: bid.toString(), blockQuantity: r.rfq.quantity,
+      });
+    }
+    const minBid = minQuantity === undefined ? 1n : BigInt(minQuantity);
+    if (minBid <= 0n || minBid > bid) {
+      throw new RfqError('COMMIT_MISMATCH', 'minQuantity must be between 1 and quantity', {
+        minQuantity: minBid.toString(), quantity: bid.toString(),
+      });
+    }
+
+    // The commit binds the dealer's OWN size, so a dealer cannot re-size after
+    // seeing the book. Same formula, same field order, same file as the dealer
+    // bond contract uses on-chain.
+    const expected = computeCommit(BigInt(price), bid, nonce, dealer as `0x${string}`);
     const valid = expected.toLowerCase() === commit.commitHash.toLowerCase();
 
-    const e = await this.audit(id, valid ? 'QUOTE_REVEALED' : 'REVEAL_FAILED', { dealer, price, valid });
+    const e = await this.audit(id, valid ? 'QUOTE_REVEALED' : 'REVEAL_FAILED', {
+      dealer, price, quantity: bid.toString(), valid,
+    });
     r.audit.push(e);
 
     // Symmetric with commit(): the reveal window closes on CONSENSUS time, not
@@ -219,6 +258,8 @@ export class RfqEngine {
       rfqId: id, dealer, price, nonce, valid,
       revealedAt: Math.floor(Date.now() / 1000),
       validUntil: consensusAt + firmness,
+      quantity: bid.toString(),
+      minQuantity: minBid.toString(),
     };
     r.reveals.push(rev);
 
@@ -229,10 +270,36 @@ export class RfqEngine {
   }
 
   /**
-   * Award to the best valid revealed price. Ties break on the earliest HCS
-   * sequence number - consensus ordering, not arrival order at our server.
+   * Award the block. Allocation is STRICT PRICE PRIORITY: walk the valid,
+   * still-firm quotes from the best price down, giving each dealer the smaller
+   * of what they asked for and what is left, until the block is exhausted.
+   * Ties break on the earliest HCS sequence number - consensus ordering, not
+   * arrival order at our server.
+   *
+   * WHY PRICE PRIORITY AND NOTHING CLEVERER
+   * A seller could in principle be better off skipping a dealer to reach a
+   * larger one behind them, and a venue that did that would be choosing winners
+   * on a rule nobody can check. Price priority is the rule every dealer can
+   * verify against the public audit trail after the fact: if you were skipped,
+   * either someone bid better, or you refused the size on offer. That
+   * verifiability is worth more than the last basis point.
+   *
+   * WHY A DEALER MAY BE SKIPPED
+   * A quote carries `minQuantity`. A dealer bidding 600 all-or-none is passed
+   * over when only 400 remain, and the 400 goes to the next price. Real desks
+   * refuse odd lots; a venue that silently hands them one is not usable.
+   *
+   * @param nonceBase first EIP-712 nonce to assign. Each fill consumes one, and
+   *        SottoSettlement marks nonces used for BOTH parties - so N fills
+   *        against one seller need N distinct nonces. Callers settling live
+   *        should pass the seller's current on-chain nonce.
    */
-  async award(id: string, settlementAddress: string, deadlineSecs = 3600): Promise<{ dealer: string; trade: Trade }> {
+  async award(
+    id: string,
+    settlementAddress: string,
+    deadlineSecs = 3600,
+    nonceBase = 0
+  ): Promise<{ dealer: string; trade: Trade; fills: Fill[] }> {
     const r = this.get(id);
     if (r.rfq.status !== 'REVEALING') {
       throw new RfqError('REVEAL_WINDOW_CLOSED', 'not awardable in this state', { status: r.rfq.status });
@@ -274,36 +341,88 @@ export class RfqEngine {
     const seqOf = (dealer: string) =>
       r.commits.find(c => sameAddr(c.dealer, dealer))?.hcsSequenceNumber ?? Number.MAX_SAFE_INTEGER;
 
-    const best = valid.reduce((a, b) => {
+    // Best price first; equal prices settle in consensus order.
+    const book = [...valid].sort((a, b) => {
       const pa = BigInt(a.price), pb = BigInt(b.price);
-      if (pb > pa) return b;
-      if (pb < pa) return a;
-      return seqOf(b.dealer) < seqOf(a.dealer) ? b : a; // tie -> earliest consensus
+      if (pb > pa) return 1;
+      if (pb < pa) return -1;
+      return seqOf(a.dealer) - seqOf(b.dealer);
     });
 
-    const notional = (BigInt(best.price) * BigInt(r.rfq.quantity)) / 100n;
-    const trade: Trade = {
-      rfqId: rfqIdToBytes32(id),
-      assetToken: r.rfq.assetToken,
-      partition: r.rfq.partition,
-      holdId: String(r.rfq.holdId ?? 0),
-      cashToken: r.rfq.cashToken,
-      seller: r.rfq.seller,
-      buyer: best.dealer,
-      quantity: r.rfq.quantity,
-      notional: notional.toString(),
-      // The dealer's firmness BOUNDS the settlement deadline. This is what makes
-      // firmness binding rather than advisory: Trade.deadline is enforced
-      // on-chain by SottoSettlement (DeadlineExpired), so a settlement attempted
-      // after the quote goes stale reverts on the chain, not just in our engine.
-      deadline: String(Math.min(best.validUntil, now + deadlineSecs)),
-      nonce: '0',
-    };
+    const block = BigInt(r.rfq.quantity);
+    let remaining = block;
+    let nonce = BigInt(nonceBase);
+    const fills: Fill[] = [];
+    const skipped: { dealer: string; wanted: string; minQuantity: string; remaining: string }[] = [];
 
-    r.award = { dealer: best.dealer, trade };
-    r.audit.push(await this.audit(id, 'AWARDED', { dealer: best.dealer, price: best.price, notional: notional.toString(), settlementAddress }));
+    for (const q of book) {
+      if (remaining === 0n) break;
+      const wanted = BigInt(q.quantity);
+      const minBid = BigInt(q.minQuantity);
+      const take = wanted < remaining ? wanted : remaining;
+      if (take < minBid) {
+        // All-or-none, and there is not enough left. Pass over, do not shrink.
+        skipped.push({
+          dealer: q.dealer, wanted: q.quantity, minQuantity: q.minQuantity, remaining: remaining.toString(),
+        });
+        continue;
+      }
+
+      const notional = (BigInt(q.price) * take) / 100n;
+      const trade: Trade = {
+        rfqId: rfqIdToBytes32(id),
+        assetToken: r.rfq.assetToken,
+        partition: r.rfq.partition,
+        // Every fill settles against the SAME hold. ATS decrements the held
+        // amount on each executeHoldByPartition and only removes the hold when
+        // it reaches zero, so one escrow serves N buyers - the seller does not
+        // place a hold per dealer and does not fragment their position.
+        holdId: String(r.rfq.holdId ?? 0),
+        cashToken: r.rfq.cashToken,
+        seller: r.rfq.seller,
+        buyer: q.dealer,
+        quantity: take.toString(),
+        notional: notional.toString(),
+        // The dealer's firmness BOUNDS the settlement deadline. This is what
+        // makes firmness binding rather than advisory: Trade.deadline is
+        // enforced on-chain by SottoSettlement (DeadlineExpired), so a
+        // settlement attempted after the quote goes stale reverts on the chain,
+        // not just in our engine. Each fill carries its OWN dealer's firmness.
+        deadline: String(Math.min(q.validUntil, now + deadlineSecs)),
+        // Distinct per fill: SottoSettlement marks the nonce used for both
+        // parties, so reusing one would make the second fill revert as a replay.
+        nonce: nonce.toString(),
+      };
+      nonce += 1n;
+      remaining -= take;
+      fills.push({
+        dealer: q.dealer, price: q.price, quantity: take.toString(), notional: notional.toString(), trade,
+      });
+    }
+
+    if (fills.length === 0) {
+      r.audit.push(await this.audit(id, 'EXPIRED', { reason: 'no quote could be allocated', skipped }));
+      r.rfq.status = 'EXPIRED';
+      throw new RfqError('COMMIT_MISMATCH', 'no quote could be allocated', { skipped });
+    }
+
+    const filled = block - remaining;
+    r.fills = fills;
+    r.rfq.filled = filled.toString();
+    r.rfq.unfilled = remaining.toString();
+    // `award` stays the best single slice so a consumer that predates partial
+    // fills still reads a sensible dealer and trade.
+    r.award = { dealer: fills[0].dealer, trade: fills[0].trade };
+
+    r.audit.push(await this.audit(id, 'AWARDED', {
+      settlementAddress,
+      filled: filled.toString(),
+      unfilled: remaining.toString(),
+      fills: fills.map(f => ({ dealer: f.dealer, price: f.price, quantity: f.quantity, notional: f.notional })),
+      skipped,
+    }));
     r.rfq.status = 'AWARDED';
-    return r.award;
+    return { ...r.award, fills };
   }
 
   async markSettled(id: string, txHash: string): Promise<Rfq> {

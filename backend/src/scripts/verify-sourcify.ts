@@ -14,6 +14,7 @@ const CHAIN = '296';
 const TARGETS = [
   { name: 'SottoSettlement', path: 'contracts/SottoSettlement.sol', envKey: 'SETTLEMENT_ADDRESS' },
   { name: 'SottoCouponScheduler', path: 'contracts/SottoCouponScheduler.sol', envKey: 'SCHEDULER_ADDRESS' },
+  { name: 'ChainlinkPriceSource', path: 'contracts/ChainlinkPriceSource.sol', envKey: 'PRICE_SOURCE_ADDRESS' },
   { name: 'SottoNavOracle', path: 'contracts/SottoNavOracle.sol', envKey: 'NAV_ORACLE_ADDRESS' },
   { name: 'SottoDealerBond', path: 'contracts/SottoDealerBond.sol', envKey: 'DEALER_BOND_ADDRESS' },
 ];

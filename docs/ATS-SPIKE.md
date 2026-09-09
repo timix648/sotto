@@ -416,6 +416,46 @@ an address like `0x…009e8d20`, whose low 8 bytes are the entity num (`0.0.1039
 contract deployed over the JSON-RPC relay gets a keccak-derived address instead, and reading it
 as long-zero produces a 49-digit nonsense id - look it up on `/api/v1/contracts/{addr}`.
 
+## Holds are partially executable, and that is what makes partial fills work
+
+`executeHoldByPartition(holdIdentifier, to, amount)` takes an amount, and the internal path is
+explicit about the remainder (`layer_0/hold/HoldStorageWrapper2.sol`):
+
+```solidity
+function _transferHold(HoldIdentifier calldata _holdIdentifier, address _to, uint256 _amount) internal {
+    if (_decreaseHeldAmount(_holdIdentifier, _amount) == 0) {
+        _removeHold(_holdIdentifier);
+    }
+    ...
+}
+```
+
+The hold is removed **only when it reaches zero**. So one hold can be executed N times to N
+different buyers. `releaseHoldByPartition` takes an amount too, so the unsold remainder can be
+returned without touching the sold part.
+
+Two conditions, both easy to miss:
+
+- **`Hold.to` must be `address(0)`.** `_operateHoldByPartition` reverts with
+  `InvalidDestinationAddress(hold.to, to)` if the hold names a destination and you execute to
+  anyone else. A hold pinned to one buyer can only ever fill with that buyer.
+- **An expired hold cannot be released, only reclaimed.** `_operateHoldByPartition` checks
+  `_isHoldExpired` for both Execute and Release, and only `Reclaim` requires expiry. So
+  `SottoSettlement.releaseHold` reverts on a hold that has already timed out — the right call
+  there is ATS's own `reclaimHoldByPartition`, which anyone may make. We hit this cleaning up
+  after a failed demo run: holdId 8 refused release and every later hold released fine.
+
+Measured on testnet, one 12-unit hold filled twice: gas 348,912 for the first fill and 480,855
+for the second (the second pays for the buyer's first-touch storage), with the held amount
+going 12 → 7 → 2.
+
+## `approve(spender, MaxUint256)` reverts on an HTS token
+
+HTS amounts are `int64`. The ERC-20 idiom `approve(spender, 2**256 - 1)` overflows and the
+transaction reverts with **no reason string**, after burning ~985,000 gas, with `status: 0` —
+which reads exactly like out-of-gas and sends you to raise the gas limit first. Approve the
+exact notional.
+
 ## Proven end to end on testnet
 
 | step | result |
@@ -428,6 +468,9 @@ as long-zero produces a 49-digit nonsense id - look it up on `/api/v1/contracts/
 | **Redemption at maturity** — 10 units burned, 10 USDC principal paid | tx `0xf8f9c267…f7c6e`, gas 144,046 |
 | **Early redemption refused** 711s before maturity | `BondMaturityDateWrong()` (`0x67d08758`) |
 | **Redemption executed by a HIP-1215 schedule, paid by the contract** | schedule `0.0.10390816`, `SUCCESS`, 0.1512 ℏ |
+| **Partial fill: one hold, two dealers, two prices** | `0xb8243847…13a2` + `0x14fca86b…2f06`, hold 12 → 7 → 2 |
+| **All-or-none dealer skipped, remainder released** | `0xc3f72483…9d82c` |
+| **Chainlink price behind the NAV band** | `ChainlinkPriceSource` `0xFb321627eC70D7E86D82F80553dC2eC98BEb124a` |
 
 The failure demo is sized so the cash leg *would* succeed (0.30 USDC notional
 against a 0.33 USDC balance and a sufficient allowance), so the revert is

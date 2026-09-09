@@ -166,17 +166,37 @@ app.post('/api/rfq/:id/close', async (req) => {
 app.post('/api/rfq/:id/reveal', async (req) => {
   const { id } = req.params as { id: string };
   const b = (req.body ?? {}) as Record<string, string>;
-  const r = await engine.reveal(id, b.dealer, b.price, b.nonce as `0x${string}`, b.firmnessSecs ? Number(b.firmnessSecs) : undefined);
-  broadcast({ type: 'quote.revealed', rfqId: id, dealer: r.dealer, price: r.price, valid: r.valid }, id);
+  const r = await engine.reveal(
+    id, b.dealer, b.price, b.nonce as `0x${string}`,
+    b.firmnessSecs ? Number(b.firmnessSecs) : undefined,
+    // Omitted = bid for the whole block, which is what every quote was before
+    // partial fills existed.
+    b.quantity, b.minQuantity
+  );
+  broadcast({
+    type: 'quote.revealed', rfqId: id, dealer: r.dealer, price: r.price,
+    quantity: r.quantity, valid: r.valid,
+  }, id);
   return r;
 });
 
 app.post('/api/rfq/:id/award', async (req) => {
   const { id } = req.params as { id: string };
-  const { dealer, trade } = await engine.award(id, env.SETTLEMENT_ADDRESS);
-  broadcast({ type: 'awarded', rfqId: id, dealer, trade }, id);
-  pushRfq(engine.get(id).rfq);
-  return { trade, digest: trade.rfqId };
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  // A block may fill across several dealers. Each fill is its own Trade with
+  // its own nonce, and SottoSettlement marks a nonce used for BOTH parties -
+  // so N fills against one seller need N distinct nonces. Start from the
+  // seller's current on-chain nonce so a replay of an earlier RFQ's trade
+  // cannot collide with this one.
+  const seller = engine.get(id).rfq.seller;
+  const nonceBase = b.nonceBase !== undefined
+    ? Number(b.nonceBase)
+    : Number(await chain.settlement.nonces(seller));
+  const { dealer, trade, fills } = await engine.award(id, env.SETTLEMENT_ADDRESS, undefined, nonceBase);
+  const rfq = engine.get(id).rfq;
+  broadcast({ type: 'awarded', rfqId: id, dealer, trade, fills, filled: rfq.filled, unfilled: rfq.unfilled }, id);
+  pushRfq(rfq);
+  return { trade, fills, filled: rfq.filled, unfilled: rfq.unfilled, digest: trade.rfqId };
 });
 
 app.post('/api/rfq/:id/settle', async (req) => {

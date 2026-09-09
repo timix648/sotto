@@ -17,6 +17,15 @@ export interface Rfq {
   status: RfqStatus;
   createdAt: number;
   hcsSequenceNumber: number | null;
+  /** Units allocated at award. Zero until awarded. */
+  filled: string;
+  /**
+   * Units still held and unsold after the award. A block that does not fill is
+   * a normal outcome, not an error - the seller keeps the remainder held and
+   * may re-offer or release it. Showing this is not optional: a seller who
+   * thinks they sold 1,000 and actually sold 600 has an unhedged position.
+   */
+  unfilled: string;
 }
 
 export interface QuoteCommit {
@@ -48,6 +57,39 @@ export interface QuoteReveal {
    * market moves - a free option the dealer never agreed to write.
    */
   validUntil: number;
+  /**
+   * The size THIS dealer is bidding for, in the same base units as
+   * `Rfq.quantity`. Bound into the commit hash alongside the price, so a dealer
+   * cannot re-size a bid after seeing the book.
+   *
+   * A dealer may bid for less than the block. That is the whole of partial
+   * fills: the seller's 1,000 can be filled 400 + 600 by two dealers at two
+   * different prices, which beats forcing one dealer to price the whole block
+   * and charge for the risk of doing so.
+   */
+  quantity: string;
+  /**
+   * The smallest fill this dealer will accept, in the same units. Equal to
+   * `quantity` means all-or-none: the dealer would rather not trade than be
+   * left with an odd lot. Defaults to 1 (any partial welcome).
+   *
+   * NOT bound into the commit, deliberately - it can only ever shrink the
+   * dealer's own allocation, so there is nothing to gain by misstating it, and
+   * binding it would have forced a fourth field into a commit formula that is
+   * already deployed on-chain in SottoDealerBond.
+   */
+  minQuantity: string;
+}
+
+/**
+ * One dealer's slice of a block. An RFQ that fills whole has exactly one.
+ */
+export interface Fill {
+  dealer: string;
+  price: string;                 // per 100 nominal, as quoted
+  quantity: string;              // units allocated to this dealer
+  notional: string;              // price * quantity / 100
+  trade: Trade;                  // the EIP-712 payload that settles this slice
 }
 
 export interface Trade {                 // EIP-712 payload — MUST match Solidity struct

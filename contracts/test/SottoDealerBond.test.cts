@@ -46,8 +46,8 @@ describe('SottoDealerBond', () => {
     await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, QUANTITY, nonce, honest.address), MIN_BOND);
     expect(await cash.balanceOf(honest.address)).to.equal(before - MIN_BOND);
 
-    await expect(bond.connect(honest).revealAndRelease(RFQ, PRICE, nonce))
-      .to.emit(bond, 'BondReleased').withArgs(RFQ, honest.address, MIN_BOND, PRICE);
+    await expect(bond.connect(honest).revealAndRelease(RFQ, PRICE, QUANTITY, nonce))
+      .to.emit(bond, 'BondReleased').withArgs(RFQ, honest.address, MIN_BOND, PRICE, QUANTITY);
     expect(await cash.balanceOf(honest.address)).to.equal(before);
   });
 
@@ -91,7 +91,7 @@ describe('SottoDealerBond', () => {
     const nonce = ethers.hexlify(ethers.randomBytes(32));
     await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, QUANTITY, nonce, honest.address), MIN_BOND);
     // same nonce, altered price
-    await expect(bond.connect(honest).revealAndRelease(RFQ, 99_999_999n, nonce))
+    await expect(bond.connect(honest).revealAndRelease(RFQ, 99_999_999n, QUANTITY, nonce))
       .to.be.revertedWithCustomError(bond, 'CommitMismatch');
   });
 
@@ -109,7 +109,7 @@ describe('SottoDealerBond', () => {
     const n2 = ethers.hexlify(ethers.randomBytes(32));
     await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, QUANTITY, n1, honest.address), MIN_BOND);
     await bond.connect(vanisher).postBond(RFQ, computeCommit(PRICE, QUANTITY, n2, vanisher.address), MIN_BOND);
-    await bond.connect(honest).revealAndRelease(RFQ, PRICE, n1);
+    await bond.connect(honest).revealAndRelease(RFQ, PRICE, QUANTITY, n1);
 
     await time.increaseTo(revealDeadline + 1n);
     await bond.slash(RFQ, vanisher.address);
@@ -128,5 +128,61 @@ describe('SottoDealerBond', () => {
     expect(names).to.not.include('releaseBond');
     expect(names).to.not.include('withdraw');
     expect(names).to.not.include('sweep');
+  });
+
+  // ---------------------------------------------------------- partial fills
+
+  it('lets a dealer bid for PART of the block and still reclaim the bond', async () => {
+    const { honest, cash, bond } = await loadFixture(fixture);
+    const nonce = ethers.hexlify(ethers.randomBytes(32));
+    const PARTIAL = QUANTITY / 5n; // bidding for 50 of a 250 block
+    const before = await cash.balanceOf(honest.address);
+
+    // The commit binds the dealer's OWN size, not the auction's. Before this,
+    // every commit was implicitly all-or-nothing for the whole block.
+    await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, PARTIAL, nonce, honest.address), MIN_BOND);
+    await expect(bond.connect(honest).revealAndRelease(RFQ, PRICE, PARTIAL, nonce))
+      .to.emit(bond, 'BondReleased').withArgs(RFQ, honest.address, MIN_BOND, PRICE, PARTIAL);
+    expect(await cash.balanceOf(honest.address)).to.equal(before);
+  });
+
+  it('refuses a bid larger than the block rather than truncating it', async () => {
+    const { honest, bond } = await loadFixture(fixture);
+    const nonce = ethers.hexlify(ethers.randomBytes(32));
+    const TOO_BIG = QUANTITY + 1n;
+
+    await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, TOO_BIG, nonce, honest.address), MIN_BOND);
+    // Silently clamping would leave the dealer believing they bought size that
+    // was never on offer.
+    await expect(bond.connect(honest).revealAndRelease(RFQ, PRICE, TOO_BIG, nonce))
+      .to.be.revertedWithCustomError(bond, 'InvalidQuantity').withArgs(TOO_BIG, QUANTITY);
+  });
+
+  it('refuses a zero-size bid', async () => {
+    const { honest, bond } = await loadFixture(fixture);
+    const nonce = ethers.hexlify(ethers.randomBytes(32));
+    await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, 0n, nonce, honest.address), MIN_BOND);
+    await expect(bond.connect(honest).revealAndRelease(RFQ, PRICE, 0n, nonce))
+      .to.be.revertedWithCustomError(bond, 'InvalidQuantity').withArgs(0n, QUANTITY);
+  });
+
+  it('will not release against a quantity the dealer did not commit to', async () => {
+    const { honest, bond } = await loadFixture(fixture);
+    const nonce = ethers.hexlify(ethers.randomBytes(32));
+    // Commit to 50, then try to reveal 200 at the same price - the dealer
+    // re-sizing after seeing the book is exactly what the commit prevents.
+    await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, 50n, nonce, honest.address), MIN_BOND);
+    await expect(bond.connect(honest).revealAndRelease(RFQ, PRICE, 200n, nonce))
+      .to.be.revertedWithCustomError(bond, 'CommitMismatch');
+  });
+
+  it('checkCommit agrees with the reveal for a partial bid', async () => {
+    const { honest, bond } = await loadFixture(fixture);
+    const nonce = ethers.hexlify(ethers.randomBytes(32));
+    await bond.connect(honest).postBond(RFQ, computeCommit(PRICE, 50n, nonce, honest.address), MIN_BOND);
+
+    expect(await bond.checkCommit(RFQ, honest.address, PRICE, 50n, nonce)).to.equal(true);
+    expect(await bond.checkCommit(RFQ, honest.address, PRICE, 60n, nonce)).to.equal(false);
+    expect(await bond.checkCommit(RFQ, honest.address, PRICE + 1n, 50n, nonce)).to.equal(false);
   });
 });

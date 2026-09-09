@@ -83,7 +83,7 @@ async function main() {
   await (await bondD.postBond(rfq1, commitOf(PRICE, QUANTITY, n1, dealer.address), MIN_BOND, { gasLimit: 2_000_000 })).wait();
   console.log(`    posted   dealer cash ${usd(before1)} -> ${usd(await cashR.balanceOf(dealer.address))} USDC`);
 
-  await (await bondD.revealAndRelease(rfq1, PRICE, n1, { gasLimit: 2_000_000 })).wait();
+  await (await bondD.revealAndRelease(rfq1, PRICE, QUANTITY, n1, { gasLimit: 2_000_000 })).wait();
   const after1 = await cashR.balanceOf(dealer.address);
   console.log(`    revealed dealer cash -> ${usd(after1)} USDC   returned: ${after1 === before1}`);
 

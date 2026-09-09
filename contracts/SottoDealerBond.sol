@@ -46,7 +46,7 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
 
     struct Auction {
         address seller;         // receives any slashed bonds
-        uint256 quantity;       // bound into every commit for this auction
+        uint256 quantity;       // the block on offer - a bid may be for any size up to this
         uint64 revealDeadline;
         uint256 minBond;
         bool exists;
@@ -67,7 +67,7 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
 
     event AuctionOpened(bytes32 indexed rfqId, address indexed seller, uint256 quantity, uint64 revealDeadline, uint256 minBond);
     event BondPosted(bytes32 indexed rfqId, address indexed dealer, uint256 amount, bytes32 commitHash);
-    event BondReleased(bytes32 indexed rfqId, address indexed dealer, uint256 amount, uint256 price);
+    event BondReleased(bytes32 indexed rfqId, address indexed dealer, uint256 amount, uint256 price, uint256 quantity);
     event BondSlashed(bytes32 indexed rfqId, address indexed dealer, address indexed seller, uint256 amount);
 
     error AuctionExists(bytes32 rfqId);
@@ -79,6 +79,7 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
     error NoBond(bytes32 rfqId, address dealer);
     error AlreadyResolved(bytes32 rfqId, address dealer);
     error CommitMismatch(bytes32 expected, bytes32 actual);
+    error InvalidQuantity(uint256 quantity, uint256 auctionQuantity);
 
     constructor(address admin, IERC20 token) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -131,11 +132,25 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
      *         itself, so release cannot be withheld by anyone.
      * @dev Commit formula is identical to packages/shared/src/commit.ts:
      *      keccak256(abi.encode(price, quantity, nonce, dealer)).
+     *
+     *      `quantity` IS THE DEALER'S OWN BID SIZE, not the auction's. Binding
+     *      it to a.quantity would have made every commit an all-or-nothing bid
+     *      for the whole block, which is what stopped partial fills from being
+     *      expressible at all. A dealer may bid for any size up to the block;
+     *      bidding for more is refused here rather than silently truncated,
+     *      because a dealer who thinks they bought 2,000 of a 1,000 block has a
+     *      position they did not intend.
      */
-    function revealAndRelease(bytes32 rfqId, uint256 price, bytes32 nonce) external nonReentrant {
+    function revealAndRelease(
+        bytes32 rfqId,
+        uint256 price,
+        uint256 quantity,
+        bytes32 nonce
+    ) external nonReentrant {
         Auction memory a = auctions[rfqId];
         if (!a.exists) revert NoAuction(rfqId);
         if (block.timestamp > a.revealDeadline) revert RevealWindowClosed(a.revealDeadline, block.timestamp);
+        if (quantity == 0 || quantity > a.quantity) revert InvalidQuantity(quantity, a.quantity);
 
         Posted storage b = posted[rfqId][msg.sender];
         // Check resolved FIRST: a released bond has amount 0, so the other order
@@ -144,7 +159,7 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
         if (b.resolved) revert AlreadyResolved(rfqId, msg.sender);
         if (b.amount == 0) revert NoBond(rfqId, msg.sender);
 
-        bytes32 expected = keccak256(abi.encode(price, a.quantity, nonce, msg.sender));
+        bytes32 expected = keccak256(abi.encode(price, quantity, nonce, msg.sender));
         if (expected != b.commitHash) revert CommitMismatch(expected, b.commitHash);
 
         b.revealed = true;
@@ -153,7 +168,7 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
         b.amount = 0;
 
         bondToken.safeTransfer(msg.sender, amount);
-        emit BondReleased(rfqId, msg.sender, amount, price);
+        emit BondReleased(rfqId, msg.sender, amount, price, quantity);
     }
 
     /**
@@ -187,10 +202,17 @@ contract SottoDealerBond is AccessControl, ReentrancyGuard {
         return (b.amount, b.commitHash, b.revealed, b.resolved);
     }
 
-    /// @notice Would this (price, nonce) satisfy the dealer's commit? Free to call.
-    function checkCommit(bytes32 rfqId, address dealer, uint256 price, bytes32 nonce) external view returns (bool) {
-        Auction memory a = auctions[rfqId];
-        if (!a.exists) return false;
-        return keccak256(abi.encode(price, a.quantity, nonce, dealer)) == posted[rfqId][dealer].commitHash;
+    /// @notice Would this (price, quantity, nonce) satisfy the dealer's commit?
+    ///         Free to call - the UI uses it to catch a mistyped nonce before
+    ///         the dealer spends gas on a reveal that cannot match.
+    function checkCommit(
+        bytes32 rfqId,
+        address dealer,
+        uint256 price,
+        uint256 quantity,
+        bytes32 nonce
+    ) external view returns (bool) {
+        if (!auctions[rfqId].exists) return false;
+        return keccak256(abi.encode(price, quantity, nonce, dealer)) == posted[rfqId][dealer].commitHash;
     }
 }
