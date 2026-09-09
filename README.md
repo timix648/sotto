@@ -67,7 +67,7 @@ automatically. The source you are reading is the bytecode that ran.
 | Atomic DvP — 20 bonds ↔ 19.67 USDC, both legs, one transaction | [`0x4c90cf5b…52fd`](https://hashscan.io/testnet/transaction/0x4c90cf5b62ed65ebdabb7621bb76c80596cd78dc29cf2303c68b3ccbcab552fd) |
 | **Security for security** — 10 bonds ↔ 12 shares, no stablecoin in the trade | [`0x320fdef2…a1fb`](https://hashscan.io/testnet/transaction/0x320fdef2aacea95585bfaa7479a0e1fccc0e291ac03094218edb7cea22f5a1fb) |
 | HIP-551 atomic batch — 3 records, all SUCCESS, each party signs only its own leg | `0.0.10380177@1788646998.050909150` |
-| HIP-1215 — the contract schedules its own coupon, and the network **executes** it: `SUCCESS`, 0.0506 ℏ charged to the contract | schedule [`0.0.10390764`](https://hashscan.io/testnet/schedule/0.0.10390764) |
+| HIP-1215 — the contract schedules a call on the bond and the network **executes** it: `SUCCESS`, 0.0506 ℏ charged to the contract. **The payload is `totalSupply()`, a read — see the note below.** | schedule [`0.0.10390764`](https://hashscan.io/testnet/schedule/0.0.10390764) |
 | **Redemption at maturity** — 10 units burned, 10 USDC principal paid, supply 10 → 0 | [`0xf8f9c267…f7c6e`](https://hashscan.io/testnet/transaction/0xf8f9c267cbfefc2893ee3903e16608131d7c5689813642ab32ebe45a1c0f7c6e) |
 | **Redemption executed by the network, not by us** — HIP-1215 schedule burns the holder out at maturity, paid by the contract | schedule [`0.0.10390816`](https://hashscan.io/testnet/schedule/0.0.10390816) |
 | **Early redemption refused by the chain** — `BondMaturityDateWrong()`, 711s before maturity | see [Verify it yourself](#verify-it-yourself) |
@@ -110,7 +110,7 @@ curl -s https://testnet.mirrornode.hedera.com/api/v1/tokens/0.0.429274 | jq '{sy
 
 Testnet has dozens of impostor tokens called USDC. This one is Circle's.
 
-**The scheduled coupon was created by the contract, and the network ran it:**
+**The scheduled call was created by the contract, and the network ran it:**
 
 ```bash
 curl -s https://testnet.mirrornode.hedera.com/api/v1/schedules/0.0.10390764 \
@@ -323,8 +323,8 @@ Two things had to be right for that to work, and both are easy to get wrong:
 - **The scheduled call's `msg.sender` is the scheduler contract**, so `_MATURITY_REDEEMER_ROLE`
   is granted to the *contract*, not to an operator key. Nobody with a private key is authorised
   to be online at maturity.
-- **The scheduling contract is the payer.** See [the coupon that fired and did
-  nothing](#the-coupon-that-fired-and-did-nothing).
+- **The scheduling contract is the payer.** See [the scheduled call that fired and did
+  nothing](#the-scheduled-call-that-fired-and-did-nothing).
 
 ---
 
@@ -454,6 +454,14 @@ npx tsx backend/src/scripts/deploy-price-source.ts
 
 We would rather write these down than have you find them.
 
+**No coupon has actually been paid.** `SottoCouponScheduler` schedules and the network
+executes — proven, with a real state change, by the scheduled `fullRedeemAtMaturity` that
+burned a holder out at maturity. But the *coupon* schedule's payload is `totalSupply()`, a
+read. ATS has `setCoupon` and `getCouponAmountFor`, and neither is called anywhere in this
+repo. The scheduling mechanism is real; the coupon on top of it is not yet written. Anyone can
+check: decode the schedule's call data on HashScan and you get `0x18160ddd`.
+
+
 **`deliver()` cannot introspect its batch siblings.** From inside the EVM there is no way to
 verify that inner transaction 1 exists or that it succeeded. Path B relies entirely on batch
 atomicity. A malicious assembler holding a valid signed Trade could call `deliver()` standalone
@@ -543,15 +551,15 @@ first.
 
 Approve the exact notional instead. Every settlement in this repo does.
 
-### The coupon that fired and did nothing
+### The scheduled call that fired and did nothing
 
 Worth its own heading, because the failure is invisible from the obvious place to look.
 
 **A HIP-1215 scheduled call is paid for by the scheduling *contract*, not by whoever called
 it.** Our first `SottoCouponScheduler` had no `receive()` and therefore a zero HBAR balance.
-Its coupon was scheduled correctly, fired at exactly the second it was scheduled for, and the
-mirror node stamped the schedule `executed_timestamp: 1788647690.113138772`. Every check we
-had said it worked.
+Its scheduled call was created correctly, fired at exactly the second it was scheduled for,
+and the mirror node stamped the schedule `executed_timestamp: 1788647690.113138772`. Every
+check we had said it worked.
 
 The transaction at that timestamp says otherwise:
 
