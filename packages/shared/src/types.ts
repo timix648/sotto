@@ -138,8 +138,13 @@ export type WsFrame =
   | { type: 'rfq.updated'; rfq: Rfq }
   | { type: 'quote.committed'; rfqId: string; dealer: string; commitHash: string; count: number }
   | { type: 'window.closed'; rfqId: string }
-  | { type: 'quote.revealed'; rfqId: string; dealer: string; price: string; valid: boolean }
-  | { type: 'awarded'; rfqId: string; dealer: string; trade: Trade }
+  | { type: 'quote.revealed'; rfqId: string; dealer: string; price: string; quantity: string; valid: boolean }
+  // `award`/`trade` are the best single slice, kept so a whole-block consumer
+  // still works. `fills` is the truth when a block splits across dealers.
+  | {
+      type: 'awarded'; rfqId: string; dealer: string; trade: Trade;
+      fills: Fill[]; filled: string; unfilled: string;
+    }
   | { type: 'settled'; rfqId: string; txHash: string; hashscanUrl: string }
   | { type: 'reverted'; rfqId: string; reason: string }
   | { type: 'audit'; event: AuditEvent };
