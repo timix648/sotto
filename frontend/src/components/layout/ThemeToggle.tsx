@@ -15,7 +15,7 @@ export function ThemeToggle() {
       aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
       title={dark ? 'Light' : 'Dark'}
       className="grid h-8 w-8 place-items-center rounded-lg border border-line
-                 text-muted hover:text-txt hover:border-lineBright focusable transition-colors"
+                 text-muted hover:border-wine hover:text-wine focusable transition-colors"
     >
       <span className={ready ? 'opacity-100' : 'opacity-0'}>
         {dark ? <SunIcon /> : <MoonIcon />}

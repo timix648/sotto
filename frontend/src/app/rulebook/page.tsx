@@ -52,7 +52,7 @@ export default function RulebookPage() {
 
   return (
     <Shell className="max-w-[1200px] py-8 sm:py-12">
-      <header className="border-y border-line py-8 sm:grid sm:grid-cols-[0.8fr_1.2fr] sm:gap-12 sm:py-12">
+      <header className="border-y-2 border-line py-8 sm:grid sm:grid-cols-[0.8fr_1.2fr] sm:gap-12 sm:py-12">
         <div>
           <p className="text-xs font-semibold tracking-[0.18em] text-held">SOTTO / VENUE RULEBOOK / 01</p>
           <h1 className="mt-4 max-w-md text-4xl font-semibold leading-[1.05] tracking-tight text-txt sm:text-5xl">
@@ -228,7 +228,7 @@ export default function RulebookPage() {
           </Section>
 
           <Section id="glossary" title="Glossary">
-            <dl className="divide-y divide-line border-y border-line">
+            <dl className="divide-y divide-line border-y-2 border-line">
               {[
                 ['Block', 'A large parcel of a security, traded in one negotiation rather than sliced into an order book.'],
                 ['RFQ', 'Request for quote. The seller asks; dealers answer; the seller picks.'],
@@ -246,7 +246,7 @@ export default function RulebookPage() {
               ))}
             </dl>
           </Section>
-          <footer className="mt-16 border-t border-line pt-5 text-sm text-dim">
+          <footer className="mt-16 border-t-2 border-line pt-5 text-sm text-dim">
             Sotto venue rulebook · testnet edition · rules reflected in the deployed contracts
             and the current venue implementation.
           </footer>

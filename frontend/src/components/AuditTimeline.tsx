@@ -93,7 +93,7 @@ export function AuditTimeline({
         return (
           <li key={`${g.kind}-${g.first.hcsSequenceNumber}`} className="relative flex gap-3 pb-4 last:pb-0">
             {/* rail */}
-            {!last && <span className="absolute bottom-0 left-[4px] top-4 w-[5px] bg-line" aria-hidden />}
+            {!last && <span className="absolute bottom-0 left-[5px] top-4 w-0.5 bg-line" aria-hidden />}
             <span
               className={cn(
                 'relative z-10 mt-1 h-3 w-3 shrink-0 rounded-full border-[2px] bg-ground',

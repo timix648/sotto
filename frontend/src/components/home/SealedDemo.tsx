@@ -34,7 +34,7 @@ export function SealedDemo() {
   const awarded = phase === 'awarded';
 
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-panel shadow-panel">
+    <div className="overflow-hidden rounded-xl border-2 border-line bg-panel shadow-panel transition-[transform,border-color,box-shadow] duration-200 ease-out hover:-translate-y-1 hover:border-wine hover:shadow-[0_16px_36px_rgb(112_38_54_/_0.12)]">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
           <div className="text-xs font-semibold text-txt">250 STO-BOND-A</div>

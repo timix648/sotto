@@ -35,7 +35,7 @@ export function Field({
 
 const inputBase =
   'w-full bg-raised border border-line rounded-md px-3 py-2.5 text-sm text-txt num ' +
-  'placeholder:text-dim focus:border-lineBright focusable transition-colors ' +
+  'placeholder:text-dim focus:border-wine focusable transition-colors ' +
   'disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function Input({ className, invalid, ...rest }: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {

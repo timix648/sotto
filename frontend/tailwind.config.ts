@@ -30,10 +30,12 @@ export default {
         pos: token('pos'),
         neg: token('neg'),
         held: token('held'),
+        wine: token('wine'),
 
         posWash: 'rgb(var(--pos) / 0.10)',
         negWash: 'rgb(var(--neg) / 0.10)',
         heldWash: 'rgb(var(--held) / 0.12)',
+        wineWash: 'rgb(var(--wine) / 0.08)',
 
         brand: token('brand'),
         brandTxt: token('brand-txt'),
@@ -47,11 +49,6 @@ export default {
       },
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],
-      },
-      borderWidth: {
-        DEFAULT: '5px',
-        2: '5px',
-        4: '5px',
       },
       boxShadow: {
         panel: 'var(--shadow)',

@@ -44,7 +44,7 @@ export function SettlementSwap({
   return (
     <section
       className={cn(
-        'overflow-hidden rounded-xl border bg-panel',
+        'overflow-hidden rounded-xl border-2 bg-panel transition-transform duration-200 ease-out hover:-translate-y-0.5',
         settled ? 'border-pos/40' : reverted ? 'border-neg/40' : 'border-line'
       )}
     >
@@ -233,7 +233,7 @@ function Flow({ direction, outcome }: { direction: 'left' | 'right'; outcome: Sw
     <span
       aria-hidden
       className={cn(
-        'absolute inset-x-0 top-1/2 h-[5px] -translate-y-1/2',
+        'absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2',
         reverted ? 'sotto-flow-recoil' : direction === 'right' ? 'sotto-flow-right' : 'sotto-flow-left'
       )}
       style={{

@@ -85,8 +85,8 @@ export default function EnterPage() {
               key={r.id}
               onClick={() => enter(r.id)}
               className={cn(
-                'group flex flex-col rounded-xl border bg-panel p-5 text-left transition-all focusable',
-                'hover:-translate-y-0.5 hover:border-lineBright hover:shadow-panel',
+                'group flex flex-col rounded-xl border-2 bg-panel p-5 text-left transition-all duration-200 focusable',
+                'hover:-translate-y-1 hover:border-wine hover:shadow-panel',
                 isCurrent ? 'border-held/50' : 'border-line'
               )}
             >
@@ -132,7 +132,7 @@ export default function EnterPage() {
         })}
       </div>
 
-      <section className="mt-8 border-y border-line py-5">
+      <section className="mt-8 border-y-2 border-line py-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-xl">
             <h2 className="text-base font-semibold text-txt">

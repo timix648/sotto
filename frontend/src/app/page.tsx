@@ -33,12 +33,12 @@ export default function HomePage() {
   return (
     <>
       {/* ---------------------------------------------------------- 1. claim */}
-      <section className="border-b border-line">
+      <section className="border-b-2 border-line">
         <Shell className="py-14 sm:py-20">
           <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_1fr] lg:gap-14">
             <div className="reveal">
               <p className="label flex items-center gap-2">
-                <span className="h-[5px] w-6 bg-held" aria-hidden />
+                <span className="h-px w-6 bg-held" aria-hidden />
                 A sealed venue on Hedera
               </p>
               <h1 className="mt-4 text-4xl font-bold leading-[1.08] tracking-tight text-txt sm:text-5xl">
@@ -46,7 +46,7 @@ export default function HomePage() {
                 <br />
                 without ever seeing
                 <br />
-                <span className="text-neg">a rival&apos;s price.</span>
+                <span className="text-wine">a rival&apos;s price.</span>
               </h1>
               <p className="mt-5 max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
                 Sotto is a request-for-quote venue for block trades in tokenised securities. A
@@ -58,15 +58,17 @@ export default function HomePage() {
               <div className="mt-7 flex flex-wrap gap-3">
                 <Link
                   href="/enter"
-                  className="rounded-lg border border-brand bg-brand px-4 py-2.5 text-sm font-semibold text-brandTxt
-                             transition-opacity hover:opacity-90 focusable"
+                  className="rounded-lg border-2 border-brand bg-brand px-4 py-2.5 text-sm font-semibold text-brandTxt
+                             transition-[transform,background-color,border-color] duration-200 hover:-translate-y-0.5
+                             hover:border-wine hover:bg-wine focusable"
                 >
                   Enter the venue →
                 </Link>
                 <Link
                   href="/rulebook"
-                  className="rounded-lg border border-line px-4 py-2.5 text-sm font-medium text-txt
-                             transition-colors hover:border-lineBright focusable"
+                  className="rounded-lg border-2 border-line px-4 py-2.5 text-sm font-medium text-txt
+                             transition-[transform,background-color,border-color] duration-200 hover:-translate-y-0.5
+                             hover:border-wine hover:bg-wineWash focusable"
                 >
                   Read the rulebook
                 </Link>
@@ -81,7 +83,7 @@ export default function HomePage() {
       </section>
 
       {/* ------------------------------------------------------ 2. mechanism */}
-      <section className="border-b border-line bg-raised/40">
+      <section className="border-b-2 border-line bg-raised/40">
         <Shell className="py-14 sm:py-20">
           <div className="reveal max-w-2xl">
             <p className="label">The mechanism</p>
@@ -90,7 +92,7 @@ export default function HomePage() {
             </h2>
           </div>
 
-          <div className="mt-10 grid border-y border-line md:grid-cols-3">
+          <div className="mt-10 grid border-y-2 border-line md:grid-cols-3">
             {[
               {
                 n: '01',
@@ -113,7 +115,7 @@ export default function HomePage() {
             ].map((step, i) => (
               <article
                 key={step.n}
-                className={`reveal flex flex-col py-7 md:px-7 ${i > 0 ? 'border-t border-line md:border-l md:border-t-0' : ''}`}
+                className={`reveal flex flex-col py-7 transition-[opacity,transform,background-color,border-color] duration-200 hover:-translate-y-0.5 hover:border-wine hover:bg-wineWash md:px-7 ${i > 0 ? 'border-t border-line md:border-l md:border-t-0' : ''}`}
                 style={{ transitionDelay: `${i * 110}ms` }}
               >
                 <span className="font-mono text-2xs font-semibold text-held">{step.n}</span>
@@ -126,7 +128,7 @@ export default function HomePage() {
             ))}
           </div>
 
-          <div className="reveal mt-7 flex flex-wrap items-center gap-x-8 gap-y-4 border-b border-line pb-7">
+          <div className="reveal mt-7 flex flex-wrap items-center gap-x-8 gap-y-4 border-b-2 border-line pb-7">
             {[
               ['Commit → reveal', 'prices sealed until the window closes on consensus'],
               ['Atomic DvP', 'both legs move in one transaction, or neither does'],
@@ -165,7 +167,7 @@ export default function HomePage() {
               />
 
               {assets && assets.length > 0 && (
-                <div className="rounded-xl border border-line bg-panel">
+                <div className="rounded-xl border-2 border-line bg-panel transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-wine hover:shadow-panel">
                   <header className="border-b border-line px-4 py-3">
                     <h3 className="text-sm font-semibold text-txt">Listed assets</h3>
                     <p className="mt-0.5 text-2xs text-dim">
@@ -196,7 +198,7 @@ export default function HomePage() {
               )}
             </div>
 
-            <div className="reveal rounded-xl border border-line bg-panel" style={{ transitionDelay: '110ms' }}>
+            <div className="reveal rounded-xl border-2 border-line bg-panel transition-[opacity,transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-wine hover:shadow-panel" style={{ transitionDelay: '110ms' }}>
               <header className="border-b border-line px-4 py-3">
                 <h3 className="text-sm font-semibold text-txt">Contracts</h3>
                 <p className="mt-0.5 text-2xs text-dim">

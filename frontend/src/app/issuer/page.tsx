@@ -305,8 +305,8 @@ function AssetPicker({
               <button
                 onClick={() => onSelect(a.token)}
                 className={cn(
-                  'w-full text-left px-4 py-3 transition-colors focusable',
-                  selected?.token === a.token ? 'bg-raised' : 'hover:bg-raised/60'
+                  'w-full px-4 py-3 text-left transition-[transform,background-color] duration-200 hover:translate-x-0.5 focusable',
+                  selected?.token === a.token ? 'bg-raised' : 'hover:bg-wineWash'
                 )}
               >
                 <div className="flex items-baseline justify-between gap-2">

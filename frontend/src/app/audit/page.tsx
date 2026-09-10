@@ -64,8 +64,8 @@ export default function AuditPage() {
                     <button
                       onClick={() => setSelected(r.id)}
                       className={cn(
-                        'w-full text-left px-4 py-3 transition-colors focusable',
-                        r.id === current ? 'bg-raised' : 'hover:bg-raised/60'
+                        'w-full px-4 py-3 text-left transition-[transform,background-color] duration-200 hover:translate-x-0.5 focusable',
+                        r.id === current ? 'bg-raised' : 'hover:bg-wineWash'
                       )}
                     >
                       <div className="flex items-center justify-between gap-2">

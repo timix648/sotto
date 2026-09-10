@@ -47,7 +47,7 @@ export function RfqList({
               <Link
                 href={`/rfq/${r.id}`}
                 className={cn(
-                  'flex items-center gap-4 px-4 hover:bg-raised/60 transition-colors focusable',
+                  'flex items-center gap-4 px-4 transition-[transform,background-color] duration-200 hover:translate-x-0.5 hover:bg-wineWash focusable',
                   dense ? 'py-2.5' : 'py-3.5'
                 )}
               >

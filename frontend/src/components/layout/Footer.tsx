@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export function Footer() {
   return (
-    <footer className="mt-16 border-t border-line">
+    <footer className="mt-16 border-t-2 border-line">
       <div className="mx-auto w-full max-w-[1400px] px-4 py-8 sm:px-6">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div className="max-w-md">
@@ -15,13 +15,13 @@ export function Footer() {
           </div>
 
           <nav className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
-            <Link href="/rulebook" className="text-muted hover:text-txt focusable rounded">
+            <Link href="/rulebook" className="text-muted hover:text-wine focusable rounded">
               Rulebook
             </Link>
-            <Link href="/audit" className="text-muted hover:text-txt focusable rounded">
+            <Link href="/audit" className="text-muted hover:text-wine focusable rounded">
               Audit trail
             </Link>
-            <Link href="/enter" className="text-muted hover:text-txt focusable rounded">
+            <Link href="/enter" className="text-muted hover:text-wine focusable rounded">
               Enter the venue
             </Link>
           </nav>

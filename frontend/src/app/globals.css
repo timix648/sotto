@@ -15,6 +15,7 @@
      pos   forest green   you receive · a credit · settled
      neg   brick rust     you pay · a debit · REVERTED
      held  ochre          escrowed · pending · needs attention
+     wine                  editorial accent · interactive hover/focus
      brand ink / cream    interactive fill (buttons) — a neutral, not a hue
 
    Off-venue links (HashScan) carry NO hue. They are muted text with an arrow.
@@ -38,6 +39,7 @@
   --pos:         44 122 87;
   --neg:         180 68 42;
   --held:        162 116 15;
+  --wine:        112 38 54;
   --brand:       27 21 18;
   --brand-txt:   250 246 241;
 
@@ -58,6 +60,7 @@
   --pos:         79 190 134;
   --neg:         238 115 85;
   --held:        220 168 69;
+  --wine:        211 103 125;
   --brand:       242 235 228;
   --brand-txt:   21 17 14;
 

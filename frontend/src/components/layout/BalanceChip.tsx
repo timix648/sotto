@@ -52,7 +52,7 @@ export function BalanceChip() {
         aria-expanded={open}
         className={cn(
           'flex items-center gap-2.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors focusable',
-          open ? 'border-lineBright bg-raised' : 'border-line hover:border-lineBright'
+          open ? 'border-wine bg-raised' : 'border-line hover:border-wine'
         )}
       >
         {isLoading && !data ? (

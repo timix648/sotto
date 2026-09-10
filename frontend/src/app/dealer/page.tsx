@@ -113,8 +113,8 @@ function RequestRow({
     <li className="border-b border-line/60 last:border-0">
       <button
         onClick={onSelect}
-        className={`w-full text-left px-4 py-3 transition-colors focusable ${
-          active ? 'bg-raised' : 'hover:bg-raised/60'
+        className={`w-full px-4 py-3 text-left transition-[transform,background-color] duration-200 hover:translate-x-0.5 focusable ${
+          active ? 'bg-raised' : 'hover:bg-wineWash'
         }`}
       >
         <div className="flex items-baseline justify-between gap-2">

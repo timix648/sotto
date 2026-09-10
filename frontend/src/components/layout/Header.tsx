@@ -33,9 +33,10 @@ export function Header() {
 
   const desk = ROLES.find((r) => r.id === role);
   const atEntry = pathname === '/enter';
+  const atHome = pathname === '/';
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-ground/90 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b-2 border-line bg-ground/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-[1320px] items-center gap-7 px-4 sm:px-6">
         <Link href="/" className="flex shrink-0 items-baseline gap-2.5 focusable rounded">
           <span className="text-lg font-bold tracking-[0.2em] text-txt">SOTTO</span>
@@ -51,7 +52,7 @@ export function Header() {
                 href={n.href}
                 className={cn(
                   'text-sm font-medium transition-colors focusable rounded',
-                  active ? 'text-txt' : 'text-muted hover:text-txt'
+                  active ? 'text-txt' : 'text-muted hover:text-wine'
                 )}
               >
                 {n.label}
@@ -62,11 +63,13 @@ export function Header() {
 
         <div className="ml-auto flex items-center gap-2.5">
           <span className="hidden items-center gap-3 text-xs text-dim xl:flex">
-            <Lamp
-              tone={ws === 'open' ? 'pos' : ws === 'connecting' ? 'held' : 'neg'}
-              label={ws === 'open' ? 'live' : ws === 'connecting' ? 'connecting' : 'offline'}
-              title={`WebSocket ${ws} · ${API_BASE}`}
-            />
+            {!atHome && (
+              <Lamp
+                tone={ws === 'open' ? 'pos' : ws === 'connecting' ? 'held' : 'neg'}
+                label={ws === 'open' ? 'live' : ws === 'connecting' ? 'connecting' : 'offline'}
+                title={`WebSocket ${ws} · ${API_BASE}`}
+              />
+            )}
             {health?.topicId && (
               <a
                 href={hashscan.topic(health.topicId) ?? '#'}
@@ -89,7 +92,7 @@ export function Header() {
               href="/enter"
               title="Change desk"
               className="hidden items-center gap-2 rounded-lg border border-line px-2.5 py-1.5
-                         text-xs text-muted transition-colors hover:border-lineBright hover:text-txt
+                         text-xs text-muted transition-colors hover:border-wine hover:text-wine
                          focusable lg:flex"
             >
               <span

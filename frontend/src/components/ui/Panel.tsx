@@ -16,9 +16,12 @@ export function Panel({
     tone === 'danger' ? 'border-neg/40' :
     tone === 'success' ? 'border-pos/40' :
     tone === 'held' ? 'border-held/40' : 'border-line';
+  const motion = tone === 'default'
+    ? 'transition-[transform,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:border-wine/60 hover:shadow-panel'
+    : 'transition-transform duration-200 ease-out hover:-translate-y-0.5';
 
   return (
-    <section className={cn('bg-panel border rounded-md', toneRing, className)}>
+    <section className={cn('rounded-md border-2 bg-panel', toneRing, motion, className)}>
       {(title || right) && (
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
