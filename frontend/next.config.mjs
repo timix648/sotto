@@ -12,17 +12,15 @@ const nextConfig = {
       '.js': ['.ts', '.js'],
       '.jsx': ['.tsx', '.jsx'],
     };
-    // `wagmi/connectors` is a single barrel — importing walletConnect from it
-    // also drags in Coinbase's Base Account SDK, which lazily imports
-    // `@x402/*` payment modules that are not published as resolvable packages.
-    // The build fails on them even though nothing here can ever reach that code
-    // path: it lives behind Coinbase's x402 payment flow, which this venue does
-    // not use. Ignoring the subtree is the narrowest fix that keeps HashPack and
-    // Blade (WalletConnect) available.
+    // AppKit's optional server-side transports refer to these Node-only
+    // helpers. They are not part of the browser wallet path.
+    config.externals.push('pino-pretty', 'lokijs', 'encoding');
+
+    // Reown's connector catalog includes Coinbase, whose optional payment flow
+    // imports `@x402/*`. Sotto does not enable that flow.
     config.plugins.push(
       new webpack.IgnorePlugin({ resourceRegExp: /^@x402\// }),
-      // Optional React Native persistence imported by MetaMask's connector
-      // barrel; the browser-injected connector used here never executes it.
+      // Optional React Native persistence is not used by the web application.
       new webpack.IgnorePlugin({
         resourceRegExp: /^@react-native-async-storage\/async-storage$/,
       })

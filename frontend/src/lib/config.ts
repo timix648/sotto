@@ -23,6 +23,9 @@ export const WS_URL =
 export const WALLETCONNECT_PROJECT_ID =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
+export const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
 /** Port 4010 is the fixture mock; 4000 is the live testnet API. */
 export const LOOKS_LIKE_MOCK_PORT = /:4010(\/|$)/.test(API_BASE);
 

@@ -52,4 +52,4 @@ Multi-dealer allocations remain `AWARDED` until every fill has settled. Each fil
 - The live browser flow uses permissionless Path A. The proven HIP-551 Path B remains available through the backend scripts; the API does not pretend to offer a browser Path B flow it cannot assemble.
 - Issuer KYC and unit issuance controls call the trusted local admin API, which holds the issuer key. Do not expose those endpoints publicly without authentication or replacing them with issuer-wallet transactions.
 - RFQ records and submitted seller signatures are in memory, matching the current backend design. Restarting the API clears active RFQs.
-- `.env.local` is ignored by Git. WalletConnect is optional; an injected wallet works without a WalletConnect project ID.
+- `.env.local` is ignored by Git. Set a Reown project ID there: AppKit lists installed EIP-6963 desktop wallets first and keeps WalletConnect QR/mobile as a fallback.

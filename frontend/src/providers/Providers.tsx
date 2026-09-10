@@ -1,33 +1,60 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider, createConfig, http } from 'wagmi';
-import { injected, walletConnect } from 'wagmi/connectors';
-import { hederaTestnet } from '@/lib/chain';
-import { JSON_RPC_URL, WALLETCONNECT_PROJECT_ID } from '@/lib/config';
+import { createAppKit, useAppKitTheme } from '@reown/appkit/react';
+import { WagmiProvider } from 'wagmi';
+import { appKitNetworks, appKitProjectId, wagmiAdapter } from '@/lib/appkit';
+import { APP_URL } from '@/lib/config';
 import { RoleProvider } from '@/hooks/useRole';
-import { ThemeProvider } from '@/hooks/useTheme';
+import { ThemeProvider, useTheme } from '@/hooks/useTheme';
 
-// MECHANICS §4.10: "A wallet extension prompting for a signature on page load,
-// from loading a redundant bundle, which looked like the venue asking for a
-// signature nobody requested." Nothing here touches a wallet until the user
-// presses Connect: no autoConnect, no eager provider calls.
-const connectors = [
-  injected({ shimDisconnect: true }),
-  // HashPack and Blade arrive over WalletConnect; without a projectId the
-  // connector is simply not offered, rather than offered and broken.
-  ...(WALLETCONNECT_PROJECT_ID
-    ? [walletConnect({ projectId: WALLETCONNECT_PROJECT_ID, showQrModal: true })]
-    : []),
-];
-
-const wagmiConfig = createConfig({
-  chains: [hederaTestnet],
-  connectors,
-  transports: { [hederaTestnet.id]: http(JSON_RPC_URL) },
-  ssr: true,
+createAppKit({
+  adapters: [wagmiAdapter],
+  networks: appKitNetworks,
+  defaultNetwork: appKitNetworks[0],
+  projectId: appKitProjectId,
+  metadata: {
+    name: 'Sotto',
+    description: 'RFQ block trading for tokenised securities on Hedera',
+    url: APP_URL,
+    icons: [],
+  },
+  defaultAccountTypes: { eip155: 'eoa' },
+  coinbasePreference: 'eoaOnly',
+  features: {
+    email: false,
+    socials: false,
+    swaps: false,
+    onramp: false,
+    send: false,
+    receive: false,
+    history: false,
+    analytics: false,
+    allWallets: true,
+    connectMethodsOrder: ['wallet'],
+    connectorTypeOrder: ['recent', 'injected', 'featured', 'walletConnect', 'recommended'],
+  },
+  themeVariables: {
+    '--apkt-accent': '#702636',
+    '--apkt-color-mix': '#702636',
+    '--apkt-color-mix-strength': 8,
+    '--apkt-font-family': 'var(--font-sans), sans-serif',
+    '--apkt-border-radius-master': '6px',
+    '--apkt-z-index': 90,
+  },
 });
+
+function AppKitThemeSync() {
+  const { theme, ready } = useTheme();
+  const { setThemeMode } = useAppKitTheme();
+
+  useEffect(() => {
+    if (ready) setThemeMode(theme);
+  }, [ready, setThemeMode, theme]);
+
+  return null;
+}
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -45,8 +72,9 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <ThemeProvider>
-      <WagmiProvider config={wagmiConfig}>
+      <WagmiProvider config={wagmiAdapter.wagmiConfig}>
         <QueryClientProvider client={queryClient}>
+          <AppKitThemeSync />
           <RoleProvider>{children}</RoleProvider>
         </QueryClientProvider>
       </WagmiProvider>
