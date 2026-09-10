@@ -8,9 +8,13 @@
   "scripts": {
     "mock": "tsx backend/src/mock/server.ts",
     "build": "hardhat compile",
+    "build:frontend": "npm run build --workspace @sotto/frontend",
+    "dev:frontend": "npm run dev --workspace @sotto/frontend",
     "test": "hardhat test",
     "serve": "tsx backend/src/server.ts",
-    "test:engine": "tsx --test backend/src/rfq/engine.test.ts"
+    "test:engine": "tsx --test backend/src/rfq/engine.test.ts",
+    "test:frontend": "npm run test --workspace @sotto/frontend",
+    "typecheck:frontend": "npm run typecheck --workspace @sotto/frontend"
   },
   "dependencies": {
     "@fastify/websocket": "^11.3.0",
@@ -22,7 +26,8 @@
   },
   "workspaces": [
     "packages/*",
-    "backend"
+    "backend",
+    "frontend"
   ],
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",

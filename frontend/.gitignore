@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# SECRETS — MECHANICS.md §4.11. An ignore rule does not untrack an
+# already-committed file. Check `git ls-files` BEFORE the first push.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+.DS_Store
+npm-debug.log*

@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   Sotto design tokens.
+
+   Warm neutrals, derived from the reference palette we agreed on: sand and
+   cream grounds, near-black warm text, a brick-rust accent and a forest green.
+   Both themes are defined here as CSS variables; Tailwind reads them, so a
+   component never names a raw colour and the two themes can never drift apart.
+
+   HOW COLOUR IS ALLOWED TO BE USED — this is the rule the whole venue follows:
+
+     pos   forest green   you receive · a credit · settled
+     neg   brick rust     you pay · a debit · REVERTED
+     held  ochre          escrowed · pending · needs attention
+     brand ink / cream    interactive fill (buttons) — a neutral, not a hue
+
+   Off-venue links (HashScan) carry NO hue. They are muted text with an arrow.
+   That is deliberate: rust is doing the most important job on the site — the
+   failed settlement — and nothing else may compete with it. Everything not on
+   that list is greyscale.
+   ========================================================================= */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --ground:      250 246 241;
+  --panel:       255 253 251;
+  --raised:      243 235 227;
+  --line:        229 217 205;
+  --line-bright: 208 189 170;
+  --txt:         27 21 18;
+  --muted:       110 96 88;
+  --dim:         155 139 127;
+  --pos:         44 122 87;
+  --neg:         180 68 42;
+  --held:        162 116 15;
+  --brand:       27 21 18;
+  --brand-txt:   250 246 241;
+
+  --shadow: 0 1px 2px rgb(27 21 18 / 0.05), 0 8px 24px rgb(27 21 18 / 0.06);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ground:      19 16 14;
+  --panel:       33 28 24;
+  --raised:      43 36 30;
+  --line:        61 52 43;
+  --line-bright: 86 73 61;
+  --txt:         243 237 230;
+  --muted:       176 161 148;
+  --dim:         132 118 105;
+  --pos:         79 190 134;
+  --neg:         238 115 85;
+  --held:        220 168 69;
+  --brand:       242 235 228;
+  --brand-txt:   21 17 14;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.35);
+}
+
+@layer base {
+  body {
+    @apply bg-ground text-txt font-sans antialiased;
+    /* MECHANICS §4.10: figures must not jitter when they update. */
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  /* The theme cross-fade is armed only while the toggle is actually switching.
+     Left on permanently it applies to every element on every change — it fought
+     the balance-flash animations and smeared the UI through a half-swapped
+     intermediate state on each repaint. */
+  html.theme-switching,
+  html.theme-switching * {
+    transition: background-color 200ms ease, border-color 200ms ease,
+                color 200ms ease, fill 200ms ease !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html.theme-switching,
+    html.theme-switching * {
+      transition: none !important;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+
+  ::selection {
+    background: rgb(var(--held) / 0.18);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--line-bright)) transparent;
+  }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--line-bright));
+    border-radius: 6px;
+    border: 3px solid rgb(var(--ground));
+  }
+  *::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  .num { font-variant-numeric: tabular-nums; }
+  .panel { @apply bg-panel border border-line rounded-xl; }
+  .label { @apply text-2xs uppercase tracking-[0.13em] text-dim font-semibold; }
+  .focusable {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-neg/50
+           focus-visible:ring-offset-2 focus-visible:ring-offset-ground;
+  }
+
+  /* Scroll-reveal for the home page. Sections start slightly low and fade up
+     once they enter the viewport; the class is added by an observer so nothing
+     is hidden if JavaScript never runs. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 620ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .reveal.is-in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; }
+  }
+
+  /* Direction of travel for a settlement leg. Animating background-position
+     means there is nothing to measure, so the two lanes stay in lockstep at
+     any width — they are one transaction and must never look staggered. */
+  .sotto-flow-right { animation: sotto-flow-right 640ms linear infinite; }
+  .sotto-flow-left  { animation: sotto-flow-left 640ms linear infinite; }
+  .sotto-flow-recoil { animation: sotto-flow-recoil 1900ms cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+}
+
+@keyframes sotto-flow-right {
+  from { background-position: 0 0; }
+  to   { background-position: 14px 0; }
+}
+@keyframes sotto-flow-left {
+  from { background-position: 0 0; }
+  to   { background-position: -14px 0; }
+}
+/* Sets off, then is pulled back to where it started. */
+@keyframes sotto-flow-recoil {
+  0%   { background-position: 0 0; }
+  45%  { background-position: 42px 0; }
+  75%  { background-position: 0 0; }
+  100% { background-position: 0 0; }
+}

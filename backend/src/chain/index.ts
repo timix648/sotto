@@ -60,7 +60,9 @@ export interface Balances {
   held: string;
   locked: string;
   cash: string;
+  cashToken: string;
   cashDecimals: number;
+  allowance: string;
 }
 
 export class Chain {
@@ -84,12 +86,13 @@ export class Chain {
    * seller look like they lost tokens.
    */
   async balances(account: string): Promise<Balances> {
-    const [available, held, symbol, cash, cashDecimals] = await Promise.all([
+    const [available, held, symbol, cash, cashDecimals, allowance] = await Promise.all([
       this.bond.balanceOf(account) as Promise<bigint>,
       this.bond.getHeldAmountFor(account) as Promise<bigint>,
       this.bond.symbol() as Promise<string>,
       this.cash.balanceOf(account) as Promise<bigint>,
       this.cash.decimals() as Promise<bigint>,
+      this.cash.allowance(account, this.cfg.settlementAddress) as Promise<bigint>,
     ]);
     return {
       account,
@@ -100,7 +103,9 @@ export class Chain {
       held: held.toString(),
       locked: '0', // separate ATS lock facet; not used by Sotto
       cash: cash.toString(),
+      cashToken: this.cfg.cashAddress,
       cashDecimals: Number(cashDecimals),
+      allowance: allowance.toString(),
     };
   }
 

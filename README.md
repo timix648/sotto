@@ -473,9 +473,10 @@ permissioned one.** That is a real cost of Path B.
 
 **Other limits, plainly:**
 
-- The demo runs with backend-held keys. Wallet-signed flows (HashPack/Blade via Hedera
-  WalletConnect, MetaMask via EIP-1193) are frontend work and are not yet wired. Nothing in
-  the backend has to change for them: trade signing is ordinary EIP-712 and touches no ATS SDK.
+- The integrated web app uses seller- and dealer-wallet signatures for holds, USDC approvals
+  and EIP-712 Trades. The backend still holds the issuer key for local KYC and issuance admin
+  routes; do not expose those routes publicly without authentication or moving them to an
+  issuer-wallet flow.
 - The ATS SDK has **no server-key path** — `SupportedWallets.CLIENT` is commented out and the
   only headless options are custodial. Sotto therefore calls `Factory.deployBond` directly
   with ethers rather than through the SDK.
@@ -629,6 +630,7 @@ backend/src/
                   redemption, partial-fill and price-source demos
   server.ts       the live API
 packages/shared/  the wire contract: types, EIP-712 domain, commit formula
+frontend/         Next.js seller, dealer, issuer, audit and settlement application
 docs/             BLUEPRINT.md · MECHANICS.md · ATS-SPIKE.md
 ```
 
@@ -640,14 +642,27 @@ disagree about what was signed.
 
 ## Running it
 
-```bash
+```powershell
 npm install
-cp .env.example .env      # public addresses are pre-filled; add your keys
-npm run build             # hardhat compile
-npm test                  # 32 contract tests
-npm run test:engine       # 14 RFQ engine tests
-npm run serve             # the live API against testnet, port 4000
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+if (-not (Test-Path frontend/.env.local)) { Copy-Item frontend/.env.example frontend/.env.local }
+npm run build
+npm test
+npm run test:engine
+npm run test:frontend
+npm run typecheck:frontend
+npm run build:frontend
 ```
+
+Start the live API and frontend in separate terminals:
+
+```powershell
+npm run serve
+npm run dev:frontend
+```
+
+Open [http://localhost:3000](http://localhost:3000). `/api/health` on port 4000 must report
+`mock: false`.
 
 Scripts, in the order they were used:
 

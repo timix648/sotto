@@ -10,7 +10,8 @@ import { ethers } from 'ethers';
 import { HcsAudit } from './hcs/client.js';
 import { RfqEngine, RfqError } from './rfq/engine.js';
 import { Chain, PARTITION_DEFAULT } from './chain/index.js';
-import type { WsFrame, Rfq } from '../../packages/shared/src/types.js';
+import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
+import type { WsFrame, Rfq, Trade } from '../../packages/shared/src/types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -44,6 +45,8 @@ const hcs = new HcsAudit({
 });
 
 const engine = new RfqEngine((id, kind, payload) => hcs.write(id, kind, payload));
+const sellerSignatures = new Map<string, Map<string, string>>();
+const settledFillNonces = new Map<string, Set<string>>();
 
 // ---------------------------------------------------------------- websocket
 const sockets = new Set<{ send: (s: string) => void; rfqId?: string }>();
@@ -70,7 +73,8 @@ app.setErrorHandler((err, _req, reply) => {
   if (err instanceof RfqError) {
     return reply.code(409).send({ error: { code: err.code, message: err.message, detail: err.detail } });
   }
-  return reply.code(500).send({ error: { code: 'SETTLEMENT_REVERTED', message: err.message, detail: {} } });
+  const message = err instanceof Error ? err.message : String(err);
+  return reply.code(500).send({ error: { code: 'SETTLEMENT_REVERTED', message, detail: {} } });
 });
 
 // ---------------------------------------------------------------- routes
@@ -82,8 +86,21 @@ app.get('/api/health', async () => ({
   topicUrl: hcs.hashscanUrl,
   settlementAddress: env.SETTLEMENT_ADDRESS,
   assetToken: env.BOND_ADDRESS,
+  bondAddress: env.BOND_ADDRESS,
+  equityAddress: env.EQUITY_ADDRESS ?? null,
+  shortBondAddress: env.SHORT_BOND_ADDRESS ?? null,
+  navOracleAddress: env.NAV_ORACLE_ADDRESS ?? null,
+  dealerBondAddress: env.DEALER_BOND_ADDRESS ?? null,
+  priceSourceAddress: env.PRICE_SOURCE_ADDRESS ?? null,
   cashToken: CASH,
+  cashTokenId: env.USDC_TOKEN_ID ?? null,
+  cashDecimals: 6,
   schedulerAddress: env.SCHEDULER_ADDRESS ?? null,
+  accounts: {
+    issuer: env.ISSUER_ADDRESS ?? null,
+    seller: env.SELLER_ADDRESS ?? null,
+    dealer: env.DEALER_ADDRESS ?? null,
+  },
   blockHeight: await chain.blockHeight(),
 }));
 
@@ -103,7 +120,14 @@ app.get('/api/rfq', async (req) => {
   return engine.list(status);
 });
 
-app.get('/api/rfq/:id', async (req) => engine.view((req.params as { id: string }).id));
+app.get('/api/rfq/:id', async (req) => {
+  const id = (req.params as { id: string }).id;
+  return {
+    ...engine.view(id),
+    sellerSignatures: Object.fromEntries(sellerSignatures.get(id) ?? []),
+    settledFillNonces: [...(settledFillNonces.get(id) ?? [])],
+  };
+});
 
 app.get('/api/rfq/:id/audit', async (req) => {
   const r = engine.get((req.params as { id: string }).id);
@@ -136,11 +160,11 @@ app.post('/api/rfq/:id/hold', async (req) => {
   let holdId = b.holdId !== undefined ? Number(b.holdId) : null;
   if (holdId === null) holdId = await chain.findHold(rfq.seller, BigInt(rfq.quantity), rfq.partition);
   if (holdId === null) {
-    return { error: { code: 'HOLD_NOT_FOUND', message: 'no hold escrowed to the settlement contract', detail: {} } };
+    throw new RfqError('HOLD_NOT_FOUND', 'no hold escrowed to the settlement contract');
   }
   const hold = await chain.readHold(rfq.seller, holdId, rfq.partition);
   if (!hold.isEscrowedHere) {
-    return { error: { code: 'HOLD_NOT_FOUND', message: 'hold is not escrowed to this venue', detail: hold } };
+    throw new RfqError('HOLD_NOT_FOUND', 'hold is not escrowed to this venue', hold);
   }
   const updated = await engine.recordHold(id, holdId, b.txHash as string | undefined);
   pushRfq(updated);
@@ -199,22 +223,74 @@ app.post('/api/rfq/:id/award', async (req) => {
   return { trade, fills, filled: rfq.filled, unfilled: rfq.unfilled, digest: trade.rfqId };
 });
 
+app.post('/api/rfq/:id/seller-signature', async (req) => {
+  const { id } = req.params as { id: string };
+  const b = (req.body ?? {}) as { nonce: string; signature: string };
+  const rec = engine.get(id);
+  const trade = rec.fills.find((fill) => fill.trade.nonce === String(b.nonce))?.trade as Trade | undefined;
+  if (!trade) throw new RfqError('SIGNATURE_INVALID', 'no awarded fill matches that trade nonce');
+
+  let recovered: string;
+  try {
+    recovered = ethers.verifyTypedData(
+      eip712Domain(env.SETTLEMENT_ADDRESS as `0x${string}`),
+      TRADE_TYPES as unknown as Record<string, Array<ethers.TypedDataField>>,
+      trade,
+      b.signature
+    );
+  } catch {
+    throw new RfqError('SIGNATURE_INVALID', 'seller signature is malformed');
+  }
+  if (recovered.toLowerCase() !== trade.seller.toLowerCase()) {
+    throw new RfqError('SIGNATURE_INVALID', 'signature did not recover to the RFQ seller');
+  }
+
+  const byNonce = sellerSignatures.get(id) ?? new Map<string, string>();
+  byNonce.set(trade.nonce, b.signature);
+  sellerSignatures.set(id, byNonce);
+  return { ok: true, nonce: trade.nonce };
+});
+
 app.post('/api/rfq/:id/settle', async (req) => {
   const { id } = req.params as { id: string };
   const b = (req.body ?? {}) as Record<string, unknown>;
   const rec = engine.get(id);
-  const trade = (b.trade as Record<string, unknown>) ?? rec.award?.trade;
+  const trade = (b.trade as Trade | undefined) ?? rec.award?.trade;
   if (!trade) throw new RfqError('HOLD_NOT_FOUND', 'no awarded trade to settle');
+  const awarded = rec.fills.some((fill) => fill.trade.nonce === trade.nonce);
+  if (!awarded) throw new RfqError('SIGNATURE_INVALID', 'trade is not an awarded fill for this RFQ');
+  const completed = settledFillNonces.get(id) ?? new Set<string>();
+  if (completed.has(trade.nonce)) {
+    throw new RfqError('SETTLEMENT_REVERTED', 'this awarded fill is already settled');
+  }
 
   try {
     const tx = await chain.settlement.settle(trade, b.sellerSig, b.buyerSig, { gasLimit: 4_000_000 });
     const receipt = await tx.wait();
     if (receipt?.status !== 1) throw new Error('transaction status 0');
 
-    const rfq = await engine.markSettled(id, tx.hash);
+    completed.add(trade.nonce);
+    settledFillNonces.set(id, completed);
+    const allSettled = rec.fills.every((fill) => completed.has(fill.trade.nonce));
+    const rfq = allSettled
+      ? await engine.markSettled(id, tx.hash)
+      : rec.rfq;
+    if (!allSettled) {
+      rec.audit.push(await hcs.write(id, 'SETTLED', {
+        txHash: tx.hash,
+        nonce: trade.nonce,
+        dealer: trade.buyer,
+        quantity: trade.quantity,
+        partial: true,
+      }));
+    }
     broadcast({ type: 'settled', rfqId: id, txHash: tx.hash, hashscanUrl: `https://hashscan.io/testnet/transaction/${tx.hash}` }, id);
-    pushRfq(rfq);
-    return { txHash: tx.hash, status: 'SETTLED' };
+    if (allSettled) pushRfq(rfq);
+    return {
+      txHash: tx.hash,
+      status: allSettled ? 'SETTLED' : 'PARTIALLY_SETTLED',
+      settledFillNonces: [...completed],
+    };
   } catch (e) {
     const reason = e instanceof Error ? e.message.split('\n')[0] : String(e);
     const rfq = await engine.markReverted(id, reason);
