@@ -52,7 +52,7 @@ export default function DealerPage() {
     <Shell className="space-y-6">
       <PageHead
         title="Dealer"
-        blurb="Quote sealed, reveal on time, settle if you win. Nobody — including the venue — can read your price before the window closes."
+        blurb="Commit a private quote, reveal it on time and settle if the seller allocates to you."
         address={address}
         isWallet={isWallet}
       />

@@ -1,6 +1,6 @@
 'use client';
 
-// Balances, always on screen.
+// Balances, always on screen after a wallet connection or explicit demo opt-in.
 //
 // You should never have to open a wallet extension to find out what you hold.
 // The chip carries the two figures that matter at a glance — the position and
@@ -59,8 +59,13 @@ export function BalanceChip() {
           <span className="h-3 w-24 animate-pulse rounded bg-raised" />
         ) : (
           <>
+            {!isWallet && (
+              <span className="rounded-sm bg-held/12 px-1.5 py-0.5 text-[11px] font-semibold tracking-[0.12em] text-held">
+                DEMO
+              </span>
+            )}
             {position && (
-              <span className="num font-medium text-txt">
+              <span className="num text-sm font-medium text-txt">
                 {formatQty(position.total, position.decimals)}
                 <span className="ml-1 text-dim">{position.symbol}</span>
               </span>
@@ -68,7 +73,7 @@ export function BalanceChip() {
             {cash && (
               <>
                 <span className="text-line" aria-hidden>│</span>
-                <span className="num font-medium text-txt">
+                <span className="num text-sm font-medium text-txt">
                   {formatCash(cash.balance, cash.decimals)}
                   <span className="ml-1 text-dim">{cash.symbol}</span>
                 </span>
@@ -92,7 +97,7 @@ export function BalanceChip() {
             <div>
               <div className="label">holdings</div>
               <div className="mt-0.5 text-2xs text-dim">
-                {isWallet ? 'connected wallet' : 'demo party'}
+                {isWallet ? 'connected wallet' : 'explicit demo desk'}
               </div>
             </div>
             <Addr value={address} href={hashscan.account(address)} />

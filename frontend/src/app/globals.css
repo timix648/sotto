@@ -67,6 +67,8 @@
 @layer base {
   body {
     @apply bg-ground text-txt font-sans antialiased;
+    font-size: 16px;
+    line-height: 1.5;
     /* MECHANICS §4.10: figures must not jitter when they update. */
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum' 1;
@@ -114,8 +116,8 @@
 
 @layer components {
   .num { font-variant-numeric: tabular-nums; }
-  .panel { @apply bg-panel border border-line rounded-xl; }
-  .label { @apply text-2xs uppercase tracking-[0.13em] text-dim font-semibold; }
+  .panel { @apply bg-panel border border-line rounded-md; }
+  .label { @apply text-xs uppercase tracking-[0.11em] text-dim font-semibold; }
   .focusable {
     @apply outline-none focus-visible:ring-2 focus-visible:ring-neg/50
            focus-visible:ring-offset-2 focus-visible:ring-offset-ground;

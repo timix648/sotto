@@ -15,26 +15,26 @@ export function Field({
 }) {
   return (
     <label className={cn('block', className)}>
-      <span className="label block mb-1">{label}</span>
+      <span className="mb-1.5 block text-sm font-medium text-muted">{label}</span>
       <span className="relative block">
         {children}
         {suffix && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-dim pointer-events-none">
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-dim">
             {suffix}
           </span>
         )}
       </span>
       {error ? (
-        <span className="mt-1 block text-2xs text-neg">{error}</span>
+        <span className="mt-1.5 block text-[13px] text-neg">{error}</span>
       ) : hint ? (
-        <span className="mt-1 block text-2xs text-dim leading-relaxed">{hint}</span>
+        <span className="mt-1.5 block text-[13px] leading-relaxed text-dim">{hint}</span>
       ) : null}
     </label>
   );
 }
 
 const inputBase =
-  'w-full bg-raised border border-line rounded-md px-3 py-2 text-sm text-txt num ' +
+  'w-full bg-raised border border-line rounded-md px-3 py-2.5 text-sm text-txt num ' +
   'placeholder:text-dim focus:border-lineBright focusable transition-colors ' +
   'disabled:opacity-50 disabled:cursor-not-allowed';
 
@@ -68,7 +68,7 @@ export function Callout({
   } as const;
 
   return (
-    <div className={cn('rounded-md border px-3 py-2.5 text-xs leading-relaxed', tones[tone])}>
+    <div className={cn('border-l-2 px-4 py-3 text-sm leading-relaxed', tones[tone])}>
       {title && <div className="font-medium">{title}</div>}
       {children && <div className={cn(title && 'mt-1', 'opacity-90')}>{children}</div>}
       {action && <div className="mt-2">{action}</div>}

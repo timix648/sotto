@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from 'wagmi';
 import { Button } from '@/components/ui/Button';
 import { truncate } from '@/lib/format';
@@ -46,8 +47,7 @@ export function WalletButton() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-2 w-72 z-50 panel p-2 shadow-2xl animate-slideIn">
             <p className="px-2 py-1.5 text-2xs text-dim leading-relaxed">
-              Optional. Without a wallet the venue acts as the demo party for the selected role —
-              the same keys the backend scripts use today.
+              Connect to trade. You can also browse publicly or open a clearly labelled testnet demo.
             </p>
             {connectors.map((c) => (
               <button
@@ -55,9 +55,16 @@ export function WalletButton() {
                 onClick={() => { connect({ connector: c }); setOpen(false); }}
                 className="w-full text-left px-2 py-2 rounded text-sm text-txt hover:bg-raised focusable"
               >
-                {c.name}
+                {c.name}{c.name === 'WalletConnect' ? ' · EVM' : ''}
               </button>
             ))}
+            <Link
+              href="/enter"
+              onClick={() => setOpen(false)}
+              className="mt-1 block border-t border-line px-2 pt-2.5 pb-1.5 text-sm text-muted hover:text-txt"
+            >
+              Preview a demo desk
+            </Link>
             {!WALLETCONNECT_PROJECT_ID && (
               <p className="px-2 pt-2 mt-1 border-t border-line text-2xs text-dim leading-relaxed">
                 HashPack and Blade need a WalletConnect projectId. Set{' '}

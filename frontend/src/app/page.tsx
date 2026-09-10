@@ -48,7 +48,7 @@ export default function HomePage() {
                 <br />
                 <span className="text-neg">a rival&apos;s price.</span>
               </h1>
-              <p className="mt-5 max-w-lg text-sm leading-relaxed text-muted sm:text-base">
+              <p className="mt-5 max-w-xl text-base leading-7 text-muted sm:text-lg sm:leading-8">
                 Sotto is a request-for-quote venue for block trades in tokenised securities. A
                 bondholder puts size up for bid; dealers quote under commit–reveal, so nobody can
                 last-look off a competitor. The winning trade settles as one atomic
@@ -90,7 +90,7 @@ export default function HomePage() {
             </h2>
           </div>
 
-          <div className="mt-10 grid gap-4 md:grid-cols-3">
+          <div className="mt-10 grid border-y border-line md:grid-cols-3">
             {[
               {
                 n: '01',
@@ -113,28 +113,28 @@ export default function HomePage() {
             ].map((step, i) => (
               <article
                 key={step.n}
-                className="reveal flex flex-col rounded-xl border border-line bg-panel p-5"
+                className={`reveal flex flex-col py-7 md:px-7 ${i > 0 ? 'border-t border-line md:border-l md:border-t-0' : ''}`}
                 style={{ transitionDelay: `${i * 110}ms` }}
               >
                 <span className="font-mono text-2xs font-semibold text-held">{step.n}</span>
-                <h3 className="mt-2 text-base font-semibold leading-snug text-txt">{step.title}</h3>
-                <p className="mt-2 flex-1 text-xs leading-relaxed text-muted">{step.body}</p>
-                <p className="mt-4 border-t border-line pt-3 text-2xs leading-relaxed text-dim">
+                <h3 className="mt-3 text-lg font-semibold leading-snug text-txt">{step.title}</h3>
+                <p className="mt-3 flex-1 text-[15px] leading-7 text-muted">{step.body}</p>
+                <p className="mt-5 border-t border-line pt-4 text-[13px] leading-6 text-dim">
                   {step.foot}
                 </p>
               </article>
             ))}
           </div>
 
-          <div className="reveal mt-6 flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-line bg-panel px-5 py-4">
+          <div className="reveal mt-7 flex flex-wrap items-center gap-x-8 gap-y-4 border-b border-line pb-7">
             {[
               ['Commit → reveal', 'prices sealed until the window closes on consensus'],
               ['Atomic DvP', 'both legs move in one transaction, or neither does'],
               ['One HCS topic', 'every event ordered by the ledger, not by our clock'],
             ].map(([t, d]) => (
               <div key={t} className="min-w-[13rem] flex-1">
-                <div className="text-xs font-semibold text-txt">{t}</div>
-                <div className="mt-0.5 text-2xs leading-relaxed text-dim">{d}</div>
+                <div className="text-sm font-semibold text-txt">{t}</div>
+                <div className="mt-1 text-[13px] leading-relaxed text-dim">{d}</div>
               </div>
             ))}
           </div>
@@ -149,7 +149,7 @@ export default function HomePage() {
             <h2 className="mt-3 text-2xl font-bold tracking-tight text-txt sm:text-3xl">
               Every claim on this site links to the ledger.
             </h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted">
+            <p className="mt-3 text-base leading-7 text-muted">
               Nothing here is mocked and nothing was minted for convenience: the bond is issued
               from Hedera&apos;s own ATS factory, and the cash leg settles in real Circle USDC.
             </p>
@@ -169,7 +169,7 @@ export default function HomePage() {
                   <header className="border-b border-line px-4 py-3">
                     <h3 className="text-sm font-semibold text-txt">Listed assets</h3>
                     <p className="mt-0.5 text-2xs text-dim">
-                      One venue, two asset classes, one settlement path
+                      Live instruments reported by the venue API
                     </p>
                   </header>
                   <ul>

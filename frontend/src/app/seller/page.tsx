@@ -50,7 +50,7 @@ export default function SellerPage() {
     <Shell className="space-y-6">
       <PageHead
         title="Seller"
-        blurb="You hold the block. Escrow a size to SottoSettlement, take sealed quotes, award the best firm price, then settle both legs at once."
+        blurb="Escrow a block, collect sealed quotes, allocate the book and settle both legs atomically."
         address={address}
         isWallet={isWallet}
       />

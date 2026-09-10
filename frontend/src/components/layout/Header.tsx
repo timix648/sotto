@@ -26,7 +26,7 @@ const NAV = [
 ];
 
 export function Header() {
-  const { role, address } = useRole();
+  const { role, isWallet, demoMode } = useRole();
   const { data: health, isError } = useHealth();
   const ws = useWsStatus();
   const pathname = usePathname();
@@ -36,10 +36,10 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-ground/90 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-6 px-4 sm:px-6">
+      <div className="mx-auto flex h-16 max-w-[1320px] items-center gap-7 px-4 sm:px-6">
         <Link href="/" className="flex shrink-0 items-baseline gap-2.5 focusable rounded">
-          <span className="text-base font-bold tracking-[0.18em] text-txt">SOTTO</span>
-          <span className="hidden text-2xs tracking-wide text-dim md:inline">RFQ BLOCK VENUE</span>
+          <span className="text-lg font-bold tracking-[0.2em] text-txt">SOTTO</span>
+          <span className="hidden text-xs tracking-wide text-dim md:inline">RFQ BLOCK VENUE</span>
         </Link>
 
         <nav className="hidden items-center gap-5 sm:flex">
@@ -50,7 +50,7 @@ export function Header() {
                 key={n.href}
                 href={n.href}
                 className={cn(
-                  'text-xs font-medium transition-colors focusable rounded',
+                  'text-sm font-medium transition-colors focusable rounded',
                   active ? 'text-txt' : 'text-muted hover:text-txt'
                 )}
               >
@@ -61,7 +61,7 @@ export function Header() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2.5">
-          <span className="hidden items-center gap-3 text-2xs text-dim xl:flex">
+          <span className="hidden items-center gap-3 text-xs text-dim xl:flex">
             <Lamp
               tone={ws === 'open' ? 'pos' : ws === 'connecting' ? 'held' : 'neg'}
               label={ws === 'open' ? 'live' : ws === 'connecting' ? 'connecting' : 'offline'}
@@ -84,7 +84,7 @@ export function Header() {
 
           {/* Which desk you are at. Pressing it returns you to the entry page —
               it reports a state, it does not switch identity in place. */}
-          {address && !atEntry && (
+          {!atEntry && (
             <Link
               href="/enter"
               title="Change desk"
@@ -92,8 +92,18 @@ export function Header() {
                          text-xs text-muted transition-colors hover:border-lineBright hover:text-txt
                          focusable lg:flex"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-held" aria-hidden />
-              {desk?.label ?? 'Desk'}
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  isWallet ? 'bg-pos' : demoMode ? 'bg-held' : 'bg-dim'
+                )}
+                aria-hidden
+              />
+              {isWallet
+                ? desk?.label ?? 'Wallet desk'
+                : demoMode
+                  ? `Demo ${desk?.label?.toLowerCase() ?? 'desk'}`
+                  : 'Choose desk'}
             </Link>
           )}
 

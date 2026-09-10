@@ -24,7 +24,7 @@ const DETAIL: Record<Role, { does: string; here: string[] }> = {
   issuer: {
     does: 'Brings the asset into existence and holds the compliance controls.',
     here: [
-      'Issue a bond or an equity from Hedera’s ATS factory',
+      'Issue units of the deployed ATS security',
       'Grant and revoke KYC — enforced by ATS at the transfer itself',
       'Watch the coupon schedule the contract wrote on-chain',
     ],
@@ -49,12 +49,13 @@ const DETAIL: Record<Role, { does: string; here: string[] }> = {
 
 export default function EnterPage() {
   const router = useRouter();
-  const { role, setRole, matchedRole } = useRole();
+  const { role, setRole, matchedRole, demoMode, setDemoMode } = useRole();
   const { data: health } = useHealth();
   const { isConnected } = useAccount();
 
   const enter = (r: Role) => {
     setRole(r);
+    setDemoMode(!isConnected);
     router.push(`/${r}`);
   };
 
@@ -95,9 +96,9 @@ export default function EnterPage() {
                   <span className="rounded border border-pos/40 px-1.5 py-0.5 text-2xs text-pos">
                     your wallet
                   </span>
-                ) : isCurrent ? (
+                ) : isCurrent && demoMode ? (
                   <span className="rounded border border-held/40 px-1.5 py-0.5 text-2xs text-held">
-                    current
+                    demo active
                   </span>
                 ) : null}
               </div>
@@ -114,18 +115,16 @@ export default function EnterPage() {
               </ul>
 
               <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-3">
-                {demoAddress ? (
+                {demoAddress && demoMode && isCurrent ? (
                   <span className="flex items-center gap-1.5">
                     <span className="label">demo party</span>
                     <span className="font-mono text-2xs text-dim">
                       {demoAddress.slice(0, 6)}…{demoAddress.slice(-4)}
                     </span>
                   </span>
-                ) : (
-                  <span />
-                )}
+                ) : <span className="text-xs text-dim">{isConnected ? 'wallet desk' : 'demo available'}</span>}
                 <span className="text-xs font-medium text-txt transition-transform group-hover:translate-x-0.5">
-                  Enter →
+                  {isConnected ? 'Enter →' : 'Open demo →'}
                 </span>
               </div>
             </button>
@@ -133,16 +132,18 @@ export default function EnterPage() {
         })}
       </div>
 
-      <section className="mt-6 rounded-xl border border-line bg-panel p-5">
+      <section className="mt-8 border-y border-line py-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-xl">
-            <h2 className="text-sm font-semibold text-txt">
-              {isConnected ? 'Wallet connected' : 'Signing — optional'}
+            <h2 className="text-base font-semibold text-txt">
+              {isConnected ? 'Wallet connected' : demoMode ? 'Demo mode is active' : 'Connect or preview'}
             </h2>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted">
+            <p className="mt-1.5 text-sm leading-relaxed text-muted">
               {isConnected
-                ? 'Trades you sign from here are signed by your wallet. The contract does not care where a signature came from — a wallet signature over the same typed data recovers to the same address as a backend key.'
-                : 'Without a wallet you act as the demo party for the desk you pick, using the same keys the backend’s settlement scripts use today. Connect one to sign the EIP-712 trade yourself. Nothing here is gated behind it.'}
+                ? 'Trading actions are signed by your wallet. The venue never substitutes a demo account while you are connected.'
+                : demoMode
+                  ? 'You explicitly opened a funded testnet demo desk. Demo balances are labelled and trading signatures still require a wallet.'
+                  : 'Public browsing shows no account or balance. Choose a desk above to open its labelled testnet demo, or connect a wallet to act as yourself.'}
             </p>
           </div>
           <WalletButton />

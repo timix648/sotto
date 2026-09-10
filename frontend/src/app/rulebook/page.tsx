@@ -18,15 +18,15 @@ import { hashscan } from '@/lib/hashscan';
 import { cn } from '@/lib/cn';
 
 const SECTIONS = [
-  { id: 'venue', label: 'The venue' },
-  { id: 'hold', label: 'The hold' },
-  { id: 'commit-reveal', label: 'Commit–reveal' },
-  { id: 'firmness', label: 'Firmness' },
-  { id: 'settlement', label: 'Settlement' },
-  { id: 'compliance', label: 'Compliance' },
-  { id: 'audit', label: 'The audit trail' },
-  { id: 'limits', label: 'What we cannot do' },
-  { id: 'glossary', label: 'Glossary' },
+  { id: 'venue', number: '01', label: 'The venue' },
+  { id: 'hold', number: '02', label: 'The hold' },
+  { id: 'commit-reveal', number: '03', label: 'Commit–reveal' },
+  { id: 'firmness', number: '04', label: 'Firmness' },
+  { id: 'settlement', number: '05', label: 'Settlement' },
+  { id: 'compliance', number: '06', label: 'Compliance' },
+  { id: 'audit', number: '07', label: 'The audit trail' },
+  { id: 'limits', number: '08', label: 'Current limits' },
+  { id: 'glossary', number: '09', label: 'Glossary' },
 ];
 
 export default function RulebookPage() {
@@ -51,41 +51,50 @@ export default function RulebookPage() {
   }, []);
 
   return (
-    <Shell className="max-w-[1100px] py-10">
-      <header className="max-w-2xl">
-        <p className="label">Sotto rulebook</p>
-        <h1 className="mt-3 text-3xl font-bold leading-tight tracking-tight text-txt sm:text-4xl">
-          How the venue works
-        </h1>
-        <p className="mt-3 text-sm leading-relaxed text-muted">
-          Everything the venue does, what it guarantees, and — at the end — what it does not.
-          The trading screens assume you have read this, which is why they carry numbers rather
-          than explanations.
-        </p>
+    <Shell className="max-w-[1200px] py-8 sm:py-12">
+      <header className="border-y border-line py-8 sm:grid sm:grid-cols-[0.8fr_1.2fr] sm:gap-12 sm:py-12">
+        <div>
+          <p className="text-xs font-semibold tracking-[0.18em] text-held">SOTTO / VENUE RULEBOOK / 01</p>
+          <h1 className="mt-4 max-w-md text-4xl font-semibold leading-[1.05] tracking-tight text-txt sm:text-5xl">
+            Rules for a sealed block venue.
+          </h1>
+        </div>
+        <div className="mt-8 sm:mt-0">
+          <p className="max-w-2xl text-lg leading-8 text-muted">
+            The operating rules, guarantees and limits of Sotto. This document is the source of
+            truth; the trading desks stay focused on decisions and execution.
+          </p>
+          <dl className="mt-8 grid grid-cols-2 gap-x-8 gap-y-4 border-t border-line pt-5 text-sm sm:grid-cols-3">
+            <div><dt className="label">Network</dt><dd className="mt-1 text-txt">Hedera testnet</dd></div>
+            <div><dt className="label">Market</dt><dd className="mt-1 text-txt">ATS securities</dd></div>
+            <div><dt className="label">Settlement</dt><dd className="mt-1 text-txt">Atomic DvP</dd></div>
+          </dl>
+        </div>
       </header>
 
-      <div className="mt-10 gap-10 lg:flex">
-        <nav className="mb-8 shrink-0 lg:sticky lg:top-20 lg:mb-0 lg:h-fit lg:w-48">
+      <div className="mt-12 grid gap-12 lg:grid-cols-[13rem_minmax(0,48rem)] lg:justify-center lg:gap-16">
+        <nav className="mb-2 lg:sticky lg:top-24 lg:mb-0 lg:h-fit">
           <ul className="flex flex-wrap gap-x-4 gap-y-1 lg:block lg:space-y-1">
             {SECTIONS.map((s) => (
               <li key={s.id}>
                 <a
                   href={`#${s.id}`}
                   className={cn(
-                    'block rounded py-1 text-xs transition-colors focusable lg:border-l lg:pl-3',
+                    'flex items-baseline gap-2 rounded py-1.5 text-sm transition-colors focusable lg:border-l lg:pl-3',
                     active === s.id
                       ? 'font-medium text-txt lg:border-held'
                       : 'text-muted hover:text-txt lg:border-line'
                   )}
                 >
-                  {s.label}
+                  <span className="font-mono text-[11px] text-dim">{s.number}</span>
+                  <span>{s.label}</span>
                 </a>
               </li>
             ))}
           </ul>
         </nav>
 
-        <div className="min-w-0 flex-1 space-y-12">
+        <article className="min-w-0">
           <Section id="venue" title="The venue">
             <P>
               Asset Tokenization Studio lets an issuer mint a compliant bond. It does not let
@@ -161,13 +170,13 @@ export default function RulebookPage() {
               transaction: verify both signatures and consume nonces, check the hold, move the
               cash, execute the hold. Any failure reverts everything.
             </P>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <Card title="Path A — EVM allowance">
+            <div className="mt-7 grid gap-8 sm:grid-cols-2">
+              <Card title="Path A — EVM allowance · live">
                 The buyer grants an ERC-20 allowance; settlement pulls the cash and executes the
                 hold in one EVM transaction. Atomicity comes from revert semantics. Anyone may
                 relay a fully-signed trade — that is deliberate.
               </Card>
-              <Card title="Path B — HIP-551 batch">
+              <Card title="Path B — HIP-551 batch · script">
                 Each party signs only their own leg: a native HTS transfer for the cash, delivery
                 as the last inner transaction. No allowance anywhere. Atomicity is provided by
                 the network rather than by the contract.
@@ -209,7 +218,8 @@ export default function RulebookPage() {
             </P>
             <Steps
               items={[
-                'Path B’s delivery call cannot introspect its batch siblings. From inside the EVM there is no way to verify the cash leg exists, so it relies entirely on batch atomicity — which is why it is gated to a relayer role while the trustless Path A is the open one.',
+                'The browser currently executes Path A. Path B is proven through the repository scripts but still needs native Hedera wallet signing and batch assembly before it can be offered as an interface action.',
+                'Dealer bonding, permissionless slashing and expired-hold reclaim exist at contract or script level; their browser controls are not yet wired.',
                 'The reveal window is a real deadline. An unrevealed quote is forfeit and the venue cannot recover it.',
                 'Testnet resets periodically; balances are re-funded from the Circle and Hedera faucets.',
                 'There is no admin function anywhere in the settlement contract that can move user funds.',
@@ -218,7 +228,7 @@ export default function RulebookPage() {
           </Section>
 
           <Section id="glossary" title="Glossary">
-            <dl className="divide-y divide-line rounded-xl border border-line">
+            <dl className="divide-y divide-line border-y border-line">
               {[
                 ['Block', 'A large parcel of a security, traded in one negotiation rather than sliced into an order book.'],
                 ['RFQ', 'Request for quote. The seller asks; dealers answer; the seller picks.'],
@@ -229,30 +239,40 @@ export default function RulebookPage() {
                 ['NAV band', 'A price range around the oracle mark. An award outside it is refused.'],
                 ['HCS', 'Hedera Consensus Service. The ordered, timestamped log the venue writes to.'],
               ].map(([term, meaning]) => (
-                <div key={term} className="grid gap-1 px-4 py-3 sm:grid-cols-[8rem_1fr] sm:gap-4">
-                  <dt className="text-xs font-semibold text-txt">{term}</dt>
-                  <dd className="text-xs leading-relaxed text-muted">{meaning}</dd>
+                <div key={term} className="grid gap-1 py-4 sm:grid-cols-[9rem_1fr] sm:gap-5">
+                  <dt className="text-sm font-semibold text-txt">{term}</dt>
+                  <dd className="text-[15px] leading-7 text-muted">{meaning}</dd>
                 </div>
               ))}
             </dl>
           </Section>
-        </div>
+          <footer className="mt-16 border-t border-line pt-5 text-sm text-dim">
+            Sotto venue rulebook · testnet edition · rules reflected in the deployed contracts
+            and the current venue implementation.
+          </footer>
+        </article>
       </div>
     </Shell>
   );
 }
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+  const number = SECTIONS.find((section) => section.id === id)?.number;
   return (
-    <section id={id} className="scroll-mt-24">
-      <h2 className="text-lg font-semibold tracking-tight text-txt">{title}</h2>
-      <div className="mt-3 space-y-3">{children}</div>
+    <section id={id} className="scroll-mt-24 border-t border-line py-12 first:border-t-0 first:pt-0">
+      <div className="grid gap-3 sm:grid-cols-[3rem_1fr] sm:gap-5">
+        <span className="font-mono text-xs font-semibold text-held">{number}</span>
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight text-txt sm:text-3xl">{title}</h2>
+          <div className="mt-5 space-y-5">{children}</div>
+        </div>
+      </div>
     </section>
   );
 }
 
 const P = ({ children }: { children: React.ReactNode }) => (
-  <p className="text-sm leading-relaxed text-muted">{children}</p>
+  <p className="text-[17px] leading-8 text-muted">{children}</p>
 );
 
 const B = ({ children }: { children: React.ReactNode }) => (
@@ -260,15 +280,15 @@ const B = ({ children }: { children: React.ReactNode }) => (
 );
 
 const Code = ({ children }: { children: React.ReactNode }) => (
-  <code className="rounded bg-raised px-1 py-0.5 font-mono text-2xs text-txt">{children}</code>
+  <code className="rounded-sm border border-line bg-raised/70 px-1.5 py-0.5 font-mono text-[13px] text-txt">{children}</code>
 );
 
 function Steps({ items, ordered }: { items: string[]; ordered?: boolean }) {
   const List = ordered ? 'ol' : 'ul';
   return (
-    <List className="mt-3 space-y-2.5">
+    <List className="mt-4 space-y-3">
       {items.map((item, i) => (
-        <li key={item} className="flex gap-3 text-sm leading-relaxed text-muted">
+        <li key={item} className="flex gap-3 text-[16px] leading-7 text-muted">
           <span
             className={cn(
               'mt-0.5 shrink-0 text-2xs font-semibold',
@@ -286,14 +306,14 @@ function Steps({ items, ordered }: { items: string[]; ordered?: boolean }) {
 }
 
 const Note = ({ children }: { children: React.ReactNode }) => (
-  <p className="mt-3 rounded-lg border border-held/30 bg-heldWash px-3 py-2.5 text-xs leading-relaxed text-held">
+  <p className="mt-5 border-l-2 border-held bg-heldWash/60 px-4 py-3 text-[15px] leading-7 text-held">
     {children}
   </p>
 );
 
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <div className="rounded-xl border border-line bg-panel p-4">
-    <h3 className="text-sm font-semibold text-txt">{title}</h3>
-    <p className="mt-1.5 text-xs leading-relaxed text-muted">{children}</p>
+  <div className="border-t-2 border-txt/15 pt-4">
+    <h3 className="text-base font-semibold text-txt">{title}</h3>
+    <p className="mt-2 text-[15px] leading-7 text-muted">{children}</p>
   </div>
 );

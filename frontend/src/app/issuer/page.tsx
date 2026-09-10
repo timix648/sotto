@@ -12,6 +12,7 @@
 // issuance is two steps. Showing them as one form would misrepresent the
 // contract and produce a confusing failure.
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, Empty } from '@/components/ui/Panel';
 import { Button } from '@/components/ui/Button';
@@ -27,26 +28,38 @@ import { formatDate, formatCash, formatPct, formatQty } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 export default function IssuerPage() {
-  const { address, isWallet } = useRole();
+  const { address, isWallet, demoMode, role } = useRole();
   const { data: assets } = useAssets();
   const { data: health } = useHealth();
   const [assetToken, setAssetToken] = useState<string | null>(null);
 
   const asset = assets?.find((a) => a.token === assetToken) ?? assets?.[0] ?? null;
+  const issuerDemo = demoMode && role === 'issuer';
 
   return (
     <Shell className="space-y-6">
       <PageHead
         title="Issuer"
-        blurb="You issued the asset and you hold the compliance controls. Revoking a KYC grant here is enforced by ATS inside the transfer itself — the venue never sees it coming."
+        blurb="Manage issuance and transfer eligibility for the live ATS security."
         address={address}
         isWallet={isWallet}
       />
 
+      {!issuerDemo && (
+        <Callout
+          tone="muted"
+          title="Issuer actions require the explicit demo desk"
+          action={<Link href="/enter" className="font-medium text-txt underline underline-offset-4">Choose the issuer demo</Link>}
+        >
+          These testnet controls use the local backend issuer key. They stay read-only until you
+          deliberately enter that demo; production will require authenticated issuer-wallet signing.
+        </Callout>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3 space-y-4">
-          <KycPanel assets={assets} health={health} />
-          <IssueForm asset={asset} accounts={health?.accounts} />
+          <KycPanel assets={assets} health={health} enabled={issuerDemo} />
+          <IssueForm asset={asset} accounts={health?.accounts} enabled={issuerDemo} />
         </div>
 
         <div className="lg:col-span-2 space-y-4">
@@ -61,10 +74,11 @@ export default function IssuerPage() {
 // ------------------------------------------------------------ the KYC toggle
 
 function KycPanel({
-  assets, health,
+  assets, health, enabled,
 }: {
   assets: Asset[] | undefined;
   health: ReturnType<typeof useHealth>['data'];
+  enabled: boolean;
 }) {
   const qc = useQueryClient();
   const [assetToken, setAssetToken] = useState('');
@@ -90,7 +104,7 @@ function KycPanel({
   const valid = /^0x[a-fA-F0-9]{40}$/.test(target);
 
   async function set(granted: boolean) {
-    if (!chosen || !valid) return;
+    if (!enabled || !chosen || !valid) return;
     setBusy(granted ? 'grant' : 'revoke');
     setError(null);
     setResult(null);
@@ -138,10 +152,10 @@ function KycPanel({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <Button variant="ghost" onClick={() => set(true)} busy={busy === 'grant'} disabled={!valid || Boolean(busy)}>
+        <Button variant="ghost" onClick={() => set(true)} busy={busy === 'grant'} disabled={!enabled || !valid || Boolean(busy)}>
           Grant KYC
         </Button>
-        <Button variant="danger" onClick={() => set(false)} busy={busy === 'revoke'} disabled={!valid || Boolean(busy)}>
+        <Button variant="danger" onClick={() => set(false)} busy={busy === 'revoke'} disabled={!enabled || !valid || Boolean(busy)}>
           Revoke KYC
         </Button>
         <p className="text-2xs text-dim flex-1 min-w-[16rem] leading-relaxed">
@@ -174,10 +188,11 @@ function KycPanel({
 // ------------------------------------------------------------- issuing units
 
 function IssueForm({
-  asset, accounts,
+  asset, accounts, enabled,
 }: {
   asset: Asset | null;
   accounts: Health['accounts'];
+  enabled: boolean;
 }) {
   const qc = useQueryClient();
   const [recipient, setRecipient] = useState('');
@@ -195,9 +210,10 @@ function IssueForm({
   const validAmount = (() => {
     try { return BigInt(amount) > 0n; } catch { return false; }
   })();
-  const canSubmit = Boolean(asset && validTarget && validAmount && !busy);
+  const canSubmit = Boolean(enabled && asset && validTarget && validAmount && !busy);
 
   async function submit() {
+    if (!enabled) return;
     setBusy(true);
     setError(null);
     setIssued(null);

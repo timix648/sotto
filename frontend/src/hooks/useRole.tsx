@@ -11,10 +11,8 @@
 //   - "Roles need to be visible at a glance." So the role is always explicit in
 //     the header, never inferred silently.
 //
-// The venue is fully usable with NO wallet connected: it then acts as the demo
-// party for the chosen role, exactly as the backend scripts do today. Connecting
-// a wallet upgrades signing from a backend key to a real signature; it is not a
-// precondition for looking around.
+// Public browsing never impersonates a funded account. Demo balances appear
+// only after the visitor explicitly chooses a demo desk on /enter.
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode,
 } from 'react';
@@ -43,6 +41,9 @@ interface RoleContextValue {
   demoAddress: string | null;
   /** Set when a connected wallet matches a known demo party. */
   matchedRole: Role | null;
+  /** Explicit opt-in; false on every new page load and whenever a wallet connects. */
+  demoMode: boolean;
+  setDemoMode: (enabled: boolean) => void;
 }
 
 const RoleContext = createContext<RoleContextValue | null>(null);
@@ -53,6 +54,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [role, setRoleState] = useState<Role>('seller');
   const [touched, setTouched] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
   // Restore the last role. Never restores a wallet connection — see above.
   useEffect(() => {
@@ -94,6 +96,10 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     if (matchedRole && !touched) setRoleState(matchedRole);
   }, [matchedRole, touched]);
 
+  useEffect(() => {
+    if (isConnected) setDemoMode(false);
+  }, [isConnected]);
+
   const setRole = useCallback((r: Role) => {
     setRoleState(r);
     setTouched(true);
@@ -101,11 +107,14 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const demoAddress = accounts?.[role] ?? null;
-  const address = (isConnected && wallet ? wallet : demoAddress) ?? null;
+  const address = (isConnected && wallet ? wallet : demoMode ? demoAddress : null) ?? null;
 
   const value = useMemo<RoleContextValue>(
-    () => ({ role, setRole, address, isWallet: Boolean(isConnected && wallet), demoAddress, matchedRole }),
-    [role, setRole, address, isConnected, wallet, demoAddress, matchedRole]
+    () => ({
+      role, setRole, address, isWallet: Boolean(isConnected && wallet), demoAddress,
+      matchedRole, demoMode, setDemoMode,
+    }),
+    [role, setRole, address, isConnected, wallet, demoAddress, matchedRole, demoMode]
   );
 
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>;

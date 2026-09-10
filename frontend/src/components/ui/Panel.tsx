@@ -18,24 +18,24 @@ export function Panel({
     tone === 'held' ? 'border-held/40' : 'border-line';
 
   return (
-    <section className={cn('bg-panel border rounded-lg', toneRing, className)}>
+    <section className={cn('bg-panel border rounded-md', toneRing, className)}>
       {(title || right) && (
-        <header className="flex items-start justify-between gap-4 px-4 py-3 border-b border-line">
+        <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            {title && <h2 className="text-sm font-medium text-txt leading-tight">{title}</h2>}
-            {subtitle && <p className="text-2xs text-dim mt-0.5 leading-tight">{subtitle}</p>}
+            {title && <h2 className="text-base font-semibold leading-tight text-txt">{title}</h2>}
+            {subtitle && <p className="mt-1 text-[13px] leading-relaxed text-dim">{subtitle}</p>}
           </div>
           {right && <div className="shrink-0">{right}</div>}
         </header>
       )}
-      <div className={cn('p-4', bodyClassName)}>{children}</div>
+      <div className={cn('p-5', bodyClassName)}>{children}</div>
     </section>
   );
 }
 
 export function Empty({ children }: { children: ReactNode }) {
   return (
-    <div className="py-10 text-center text-sm text-dim border border-dashed border-line rounded-md">
+    <div className="py-10 text-center text-sm text-dim">
       {children}
     </div>
   );
