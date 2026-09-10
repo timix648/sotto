@@ -48,6 +48,11 @@ export default {
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],
       },
+      borderWidth: {
+        DEFAULT: '5px',
+        2: '5px',
+        4: '5px',
+      },
       boxShadow: {
         panel: 'var(--shadow)',
       },

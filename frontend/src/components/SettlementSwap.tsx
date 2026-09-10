@@ -233,7 +233,7 @@ function Flow({ direction, outcome }: { direction: 'left' | 'right'; outcome: Sw
     <span
       aria-hidden
       className={cn(
-        'absolute inset-x-0 top-1/2 h-px -translate-y-1/2',
+        'absolute inset-x-0 top-1/2 h-[5px] -translate-y-1/2',
         reverted ? 'sotto-flow-recoil' : direction === 'right' ? 'sotto-flow-right' : 'sotto-flow-left'
       )}
       style={{

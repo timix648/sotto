@@ -32,7 +32,7 @@ export function Button({
       {busy && (
         <span
           aria-hidden
-          className="h-3 w-3 rounded-full border-2 border-current border-r-transparent animate-spin"
+          className="h-3 w-3 animate-spin rounded-full border-[2px] border-current border-r-transparent"
         />
       )}
       {children}

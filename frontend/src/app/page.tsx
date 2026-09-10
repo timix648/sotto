@@ -38,7 +38,7 @@ export default function HomePage() {
           <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_1fr] lg:gap-14">
             <div className="reveal">
               <p className="label flex items-center gap-2">
-                <span className="h-px w-6 bg-held" aria-hidden />
+                <span className="h-[5px] w-6 bg-held" aria-hidden />
                 A sealed venue on Hedera
               </p>
               <h1 className="mt-4 text-4xl font-bold leading-[1.08] tracking-tight text-txt sm:text-5xl">
@@ -58,7 +58,7 @@ export default function HomePage() {
               <div className="mt-7 flex flex-wrap gap-3">
                 <Link
                   href="/enter"
-                  className="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-brandTxt
+                  className="rounded-lg border border-brand bg-brand px-4 py-2.5 text-sm font-semibold text-brandTxt
                              transition-opacity hover:opacity-90 focusable"
                 >
                   Enter the venue →
