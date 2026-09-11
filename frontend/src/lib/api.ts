@@ -53,8 +53,37 @@ export const ERROR_COPY: Record<string, string> = {
 
 export function errorCopy(e: unknown): string {
   if (e instanceof SottoError) return ERROR_COPY[e.code] ?? e.message;
+
+  // EIP-1193 4100. Wallets word it as "the requested method and/or account has
+  // not been authorized by the user", which reads like the venue asked for
+  // something forbidden. It almost always means something duller: the account
+  // the page is connected as is not the one currently selected in the wallet,
+  // usually because it was switched there after connecting. viem then prints
+  // the whole calldata underneath it, which buries the one sentence that would
+  // have helped.
+  if (isUnauthorized(e)) {
+    return 'Your wallet would not authorise this transaction for the connected account. '
+      + 'Open the wallet and check the selected account is the one shown in the header — '
+      + 'switching accounts inside the wallet after connecting leaves the page on the old one. '
+      + 'If it already matches, disconnect and reconnect to re-grant permission.';
+  }
+
   if (e instanceof Error) return e.message;
   return ERROR_COPY.UNKNOWN;
+}
+
+function isUnauthorized(e: unknown): boolean {
+  const seen = new Set<unknown>();
+  let cur = e;
+  // viem wraps the provider error a few layers deep, so the code is on a cause
+  // rather than the thing that was thrown.
+  while (cur && typeof cur === 'object' && !seen.has(cur)) {
+    seen.add(cur);
+    const o = cur as { code?: unknown; name?: unknown; cause?: unknown };
+    if (o.code === 4100 || o.name === 'UnauthorizedProviderError') return true;
+    cur = o.cause;
+  }
+  return false;
 }
 
 // ------------------------------------------------------- response-only types
