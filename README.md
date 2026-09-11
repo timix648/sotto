@@ -19,14 +19,57 @@ untouched.
 
 **ETHOnline 2026 · Hedera · Tokenization of Anything**
 
+| | |
+|---|---|
+| **Live venue** | _deploying — see [Running it](#running-it) to run it locally in two commands_ |
+| **Demo video** | _recording_ |
+| **Contracts** | five, all [verified on HashScan](#live-on-hedera-testnet) as `exact_match` |
+| **Audit trail** | [HCS topic `0.0.10383803`](https://hashscan.io/testnet/topic/0.0.10383803) — public, consensus-ordered |
+| **Cash** | real Circle USDC `0.0.429274`. Nothing was minted for convenience |
+
 > **Judging or running the demo?** Start with the
 > [three-minute walkthrough and operator guide](docs/DEMO-GUIDE.md). It separates what is
 > browser-live, what is a deliberately labelled demo, and what is proven on-chain by scripts.
 
 ---
 
+## One trade, end to end
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Seller
+    participant A as ATS bond
+    participant V as Sotto venue
+    participant D as Dealers
+    participant X as SottoSettlement
+
+    S->>A: createHoldByPartition
+    Note over S,A: available drops, held rises,<br/>TOTAL DOES NOT MOVE —<br/>the tokens never leave the seller
+    S->>V: open RFQ for the block
+    D->>V: keccak256(price, size, nonce, dealer)
+    Note over V,D: sealed — the venue cannot<br/>read a price either
+    V->>V: window closes on HCS consensus time
+    D->>V: reveal price + size
+    V->>V: allocate: best price first,<br/>all-or-none respected
+    S->>X: EIP-712 signature per fill
+    D->>X: EIP-712 signature + exact USDC allowance
+    X->>X: verify both · check NAV band · check the hold
+    X->>S: cash leg
+    X->>A: executeHoldByPartition
+    A-->>X: ATS runs compliance AT THE TRANSFER
+    Note over X,A: any failure reverts BOTH legs.<br/>Revoke the buyer's KYC and<br/>neither ledger moves.
+```
+
+Every arrow above is a real transaction on Hedera testnet. The hashes are in
+[Proven on-chain](#proven-on-chain-not-asserted).
+
+---
+
 ## Contents
 
+- [One trade, end to end](#one-trade-end-to-end)
+- [The venue](#the-venue)
 - [Live on Hedera testnet](#live-on-hedera-testnet)
 - [Judge walkthrough](#judge-walkthrough)
 - [Verify it yourself](#verify-it-yourself)
@@ -67,6 +110,56 @@ of the transactions below. For an owner-operated transaction, follow
 Hedera WalletConnect adapter for a native `hedera:testnet` connection preview, while the complete
 HIP-551 settlement remains chain-proven through `backend/src/scripts/settle-batch.ts`. The UI says
 so plainly; a wallet connection is never presented as a transaction signature.
+
+---
+
+## The venue
+
+Eight routes. Dark, dense, instrument-panel — tabular numerals so figures do not jitter when
+they update, truncated monospace addresses with click-to-copy, no gradient hero. It should
+look like something a trading desk would tolerate.
+
+| Route | What it is for |
+|---|---|
+| `/` | The venue, and one sealed-quote demo you can play with before connecting anything |
+| `/rulebook` | Commit–reveal, holds, compliance at transfer, and the two settlement paths |
+| `/enter` | Choose a role, connect a wallet, or open a **clearly labelled** demo desk |
+| `/issuer` | KYC grant and revoke · issue units · publish the reference NAV · redeem at maturity |
+| `/seller` | Open an RFQ, escrow the block, watch the book, allocate it |
+| `/dealer` | Seal a quote with a size, reveal it, approve the exact cash, settle |
+| `/rfq/[id]` | The dual ledger — both sides of one trade, moving in the same instant |
+| `/audit` | The HCS trail, with every commit's sequence number below every reveal's |
+
+Two screens carry the whole thing.
+
+**The position card.** Total, available, held, locked. Place a hold and *available drops while
+held rises and **total does not move***. That one animation is the difference between this and
+an escrow swap: the seller never stops being the holder of record, keeps earning coupons on
+the full position, and stays subject to the issuer's freeze and seizure powers.
+
+**The dual ledger.** Seller and buyer side by side, both updating in the same instant on
+settlement. The simultaneity *is* the product.
+
+### The whole demo runs in a browser
+
+No terminal, at any point:
+
+```
+grant KYC → issue units → publish the reference NAV → open an RFQ → escrow the block
+→ dealers seal quotes → window closes on consensus time → dealers reveal with a size
+→ allocate across dealers → approve exact USDC → settle
+→ revoke KYC and watch the next settlement revert with both ledgers untouched
+→ redeem the matured note: principal paid, units burned
+```
+
+Placing the hold, signing each fill and approving the cash are **wallet transactions** — the
+seller and the dealer sign with their own keys. The venue relays the final `settle()` and pays
+its gas, which it can do because `settle()` is permissionless and both signatures bind the
+exact trade. It cannot redirect or take anything; there is a test asserting precisely that.
+
+What still needs a terminal is stated rather than hidden: the HIP-551 batch path, and
+deploying a brand-new instrument. Neither is dressed up as a browser feature, in the UI or
+here.
 
 ---
 
@@ -546,6 +639,10 @@ permissioned one.** That is a real cost of Path B.
 - A dealer's `minQuantity` is not bound into the commit hash. Misstating it can only shrink
   that dealer's own allocation, and binding it would have forced a fourth field into a commit
   formula already deployed on-chain.
+- **A demo desk drains itself.** Cash flows dealer to seller and units flow seller to dealer, so
+  repeated runs move both one way until one side cannot fill. The reset is a rebalance, not a
+  redeploy, but it is a real operational chore and it is why a desk left alone eventually stops
+  being able to trade.
 - Testnet resets periodically; balances are re-funded from the Circle and Hedera faucets.
 - **There is no admin function anywhere in `SottoSettlement` that can move user funds.**
   `RELAYER_ROLE` gates `deliver()`. `setNavOracle` can only cause trades to be *refused*, never
@@ -778,11 +875,13 @@ Two of our own mechanisms map directly onto open questions in the draft:
   reclaim after. Across a channel, a bundle that never lands must not be able to trap a
   seller's collateral indefinitely.
 
-**We have not built against CLPR and we are not claiming to have.** HIP-1535 is `status:
-Draft` with an empty `release:` field, the CLPR Service requires consensus-node changes that
-are not deployed, there is no SDK or testnet endpoint, and the specification itself still
-carries open design issues. Every other claim in this README opens a transaction hash; this
-one would not, so it stays a roadmap item.
+**Sotto is built to plug into CLPR, and will when it is ready.** The protocol is in active
+development — HIP-1535 is open for public contribution and the CLPR Service is not yet
+available on testnet, so there is nothing to integrate against today. That is timing, not fit:
+the pieces a CLPR channel would need are the ones Sotto already has, and when the service
+reaches testnet the work is a cash-leg channel rather than a redesign. Every other claim in
+this README opens a transaction hash. This one cannot yet, so it stays a roadmap item rather
+than a feature.
 
 ---
 
