@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePublicClient, useWriteContract } from 'wagmi';
+import { useNativeSigner } from '@/hooks/useNativeSigner';
 import { getAddress } from 'viem';
 import { Panel, Empty } from '@/components/ui/Panel';
 import { Button } from '@/components/ui/Button';
@@ -23,7 +24,10 @@ import { StatusPill, Countdown } from '@/components/ui/Status';
 import { PageHead } from '@/components/layout/PageHead';
 import { Shell } from '@/components/layout/Shell';
 import { QuoteBoard } from '@/components/QuoteBoard';
-import { useHealth, useAssets, useRfqs, useRfq, useBalances, useNow, useRfqSubscription, qk } from '@/hooks/useApi';
+import {
+  useHealth, useAssets, useRfqs, useRfq, useBalances, useNow, useRfqSubscription,
+  useBatchParams, qk,
+} from '@/hooks/useApi';
 import { useRole } from '@/hooks/useRole';
 import { useSettlementPath } from '@/hooks/useSettlementPath';
 import { useCommitStore, type SealedQuote } from '@/hooks/useCommitStore';
@@ -615,9 +619,17 @@ function SettleSteps({
   const { sign } = useSignTrade(settlementAddress);
   const publicClient = usePublicClient();
   const { writeContractAsync } = useWriteContract();
+  const { path } = useSettlementPath();
+  const native = useNativeSigner();
+  const { data: batchParams } = useBatchParams();
   const [approving, setApproving] = useState(false);
   const [settling, setSettling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Path B grants no allowance at all, so the approve step simply does not
+  // apply to it. Saying that out loud is the point of the whole path.
+  const pathB = path === 'B';
+  const batchReady = Boolean(pathB && batchParams?.available && native.connected);
 
   const notional = BigInt(trade.notional);
   const approved = (() => {
@@ -651,6 +663,68 @@ function SettleSteps({
       setError(errorCopy(e));
     } finally {
       setApproving(false);
+    }
+  }
+
+  /**
+   * Path B. The buyer signs a native HTS transfer of their own cash; the venue
+   * batches it with the delivery call. No allowance is granted anywhere, and
+   * the venue never holds either asset — the network provides the atomicity.
+   */
+  async function settleBatch() {
+    setSettling(true);
+    setError(null);
+    try {
+      if (!isWallet || !account || account.toLowerCase() !== trade.buyer.toLowerCase()) {
+        throw new Error('Connect the awarded dealer wallet before signing the Trade.');
+      }
+      if (!sellerSignature) {
+        throw new Error('The seller signature has not reached the venue yet. Ask the seller to finish the award step.');
+      }
+      if (!batchParams?.available) throw new Error('Path B is not configured on this venue.');
+      if (!native.signer || !native.accountId) {
+        throw new Error(
+          'Connect a Hedera-native wallet session for Path B. If HashPack connected but this ' +
+          'still says no session, use its WalletConnect QR rather than the direct button.'
+        );
+      }
+
+      // A Trade names its parties by EVM address; an HTS transfer moves value
+      // between account ids, so both sides are resolved from the mirror node.
+      const [buyerAccount, sellerAccount] = await Promise.all([
+        api.batchAccount(trade.buyer),
+        api.batchAccount(trade.seller),
+      ]);
+      if (buyerAccount.accountId !== native.accountId) {
+        throw new Error(
+          `The connected native account ${native.accountId} is not the awarded dealer ` +
+          `${buyerAccount.accountId}.`
+        );
+      }
+
+      // Two signatures, two namespaces: EVM for the Trade, native for the cash.
+      const buyerSig = await sign(trade);
+      // Loaded on demand. The Hedera SDK is ~1.5MB and only Path B needs it;
+      // importing it at module scope put that on every dealer page load,
+      // including the Path A visitors who will never touch it.
+      const { signCashLeg } = await import('@/lib/batch');
+      const innerCashTxBase64 = await signCashLeg({
+        signer: native.signer,
+        params: batchParams,
+        buyerAccountId: buyerAccount.accountId,
+        sellerAccountId: sellerAccount.accountId,
+        notional: trade.notional,
+      });
+
+      await api.settleBatch(rfqId, { trade, sellerSig: sellerSignature, buyerSig, innerCashTxBase64 });
+      qc.invalidateQueries({ queryKey: qk.rfq(rfqId) });
+      qc.invalidateQueries({ queryKey: ['balances'] });
+    } catch (e) {
+      setError(errorCopy(e));
+      qc.invalidateQueries({ queryKey: qk.rfq(rfqId) });
+      qc.invalidateQueries({ queryKey: ['balances'] });
+    } finally {
+      setSettling(false);
     }
   }
 
@@ -707,36 +781,90 @@ function SettleSteps({
       </div>
 
       <ol className="space-y-2">
-        <Step
-          n={1}
-          done={approvedEnough}
-          title={approvedEnough
-            ? `Approved ${formatCash(approved, cashDecimals)}`
-            : 'Approve the settlement contract for the exact notional'}
-          action={
-            !approvedEnough ? (
-              <Button onClick={approve} busy={approving} disabled={!funded || !isWallet}>
-                Approve {formatCash(trade.notional, cashDecimals)}
-              </Button>
-            ) : null
-          }
-        />
-        <Step
-          n={2}
-          done={false}
-          title="Sign the Trade and settle"
-          action={
-            <Button
-              variant="primary"
-              onClick={settle}
-              busy={settling}
-              disabled={settling || !approvedEnough || !isWallet || !sellerSignature}
-            >
-              Sign and settle
-            </Button>
-          }
-        />
+        {pathB ? (
+          <>
+            <Step
+              n={1}
+              done={native.connected}
+              title={native.connected
+                ? `Hedera-native session ${native.accountId}`
+                : 'Connect a Hedera-native wallet — Path B grants no allowance'}
+            />
+            <Step
+              n={2}
+              done={false}
+              title="Sign the Trade and your own cash leg"
+              action={
+                <Button
+                  variant="primary"
+                  onClick={settleBatch}
+                  busy={settling}
+                  disabled={settling || !batchReady || !funded || !isWallet || !sellerSignature}
+                >
+                  Sign and settle
+                </Button>
+              }
+            />
+          </>
+        ) : (
+          <>
+            <Step
+              n={1}
+              done={approvedEnough}
+              title={approvedEnough
+                ? `Approved ${formatCash(approved, cashDecimals)}`
+                : 'Approve the settlement contract for the exact notional'}
+              action={
+                !approvedEnough ? (
+                  <Button onClick={approve} busy={approving} disabled={!funded || !isWallet}>
+                    Approve {formatCash(trade.notional, cashDecimals)}
+                  </Button>
+                ) : null
+              }
+            />
+            <Step
+              n={2}
+              done={false}
+              title="Sign the Trade and settle"
+              action={
+                <Button
+                  variant="primary"
+                  onClick={settle}
+                  busy={settling}
+                  disabled={settling || !approvedEnough || !isWallet || !sellerSignature}
+                >
+                  Sign and settle
+                </Button>
+              }
+            />
+          </>
+        )}
       </ol>
+
+      {pathB && (
+        <div className="mt-3">
+          <Callout
+            tone={native.connected ? 'muted' : 'held'}
+            title={native.connected
+              ? 'Path B — each party signs only its own leg'
+              : 'Path B needs a Hedera-native wallet session'}
+          >
+            {native.connected ? (
+              <>
+                You sign a native HTS transfer of your own cash and the EIP-712 Trade. The venue
+                signs delivery and submits both as one HIP-551 batch. No allowance is granted
+                anywhere, and the network — not the contract — guarantees both legs or neither.
+              </>
+            ) : (
+              <>
+                Connect a Hedera-native session (HashPack or Kabila). If your wallet connected but
+                this still says no session, it gave an EVM session instead — use its WalletConnect
+                QR rather than the direct button.
+              </>
+            )}
+          </Callout>
+        </div>
+      )}
 
       {!funded && (
         <div className="mt-3">

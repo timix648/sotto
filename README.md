@@ -328,10 +328,24 @@ Each party signs only its own leg. **No allowance anywhere.** The cash leg is a 
 transfer, not an ERC-20 facade call, and atomicity is provided by the network rather than by
 the contract. EVM chains structurally cannot do this.
 
-The browser currently completes Path A. Its `/enter` route can also establish a Hedera-native
-HIP-820 wallet session for Path B, but browser RFQ batch signing and relayer handoff are not yet
-wired. The complete Path B transaction is executed by `settle-batch.ts`; see the
-[demo guide](docs/DEMO-GUIDE.md#path-b--native-connection-preview-and-script-backed-settlement).
+**Both paths are wired in the browser.** The dealer portal drops the approve step entirely on
+Path B — there is no allowance to grant — and asks for two signatures in two namespaces: an
+EIP-712 Trade over EVM, and a native HTS transfer over HIP-820 `hedera_signTransaction`, which
+signs *without* executing. The venue verifies the signed cash leg against the trade, wraps it
+with the delivery call and submits the pair. It is the batch **operator**, never a custodian:
+the inner transaction arrives frozen and signed, so its contents cannot be altered, and the
+batchKey authorises submission rather than modification.
+
+That verification is the load-bearing part. Without it a buyer signs a transfer of one tiny
+unit, hands it over and takes delivery of the whole block, while the seller's security leg is
+already committed by their own signature. Nine offline tests cover the ways to try it — short
+payment, wrong payee, wrong token, a smuggled extra transfer, hbar on the side, a foreign
+batchKey, and an inner transaction that is not a transfer at all — each round-tripped through
+bytes, because a check that only passes on an in-memory object proves nothing about what
+arrives over the wire.
+
+`settle-batch.ts` still runs the same settlement end to end with local keys, and remains the
+proof that does not depend on any wallet.
 
 The network permits **at most one contract call per batch and it must be last**, which is why
 Path A moves cash before delivery too — both paths then reason identically and tests transfer
@@ -615,9 +629,14 @@ permissioned one.** That is a real cost of Path B.
 
 **Other limits, plainly:**
 
-- Path B native-wallet discovery is present in the web app, but complete browser batch signing
-  is not. The deployed contract still needs both EIP-712 Trade signatures in addition to the
-  buyer-signed native cash leg, and the backend must validate that leg before relayer assembly.
+- Path B browser settlement depends on the connected wallet implementing HIP-820
+  `hedera_signTransaction` for a transaction frozen with `nodeAccountId 0.0.0` and a batchKey
+  set. The library requests it and the venue handles everything after it; whether a given
+  wallet honours it is that wallet's business, and the portal says which session it actually
+  got rather than assuming. HashPack's direct injected button is known to return an EVM session
+  where a native one was asked for
+  ([hedera-wallet-connect#670](https://github.com/hashgraph/hedera-wallet-connect/issues/670)) —
+  use its WalletConnect QR route.
 - The integrated web app uses seller- and dealer-wallet signatures for holds, USDC approvals
   and EIP-712 Trades. The backend still holds the issuer key for local KYC and issuance admin
   routes; do not expose those routes publicly without authentication or moving them to an

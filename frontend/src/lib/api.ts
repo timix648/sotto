@@ -62,6 +62,25 @@ export function errorCopy(e: unknown): string {
 // endpoints in §3.4 return around it. Fields the blueprint does not promise are
 // optional, so a missing one degrades a panel instead of throwing.
 
+/** What a browser needs to build an inner cash leg the venue can batch. */
+export interface BatchParamsResponse {
+  batchPublicKey: string;
+  relayerAccountId: string;
+  cashTokenId: string;
+  settlementAddress: string;
+  available: boolean;
+}
+
+export interface BatchSettleResponse {
+  transactionId?: string;
+  hashscanUrl?: string;
+  batchStatus?: string;
+  path: 'B';
+  status: 'SETTLED' | 'PARTIALLY_SETTLED' | 'FAILED';
+  settledFillNonces?: string[];
+  reason?: string;
+}
+
 /** The band guard's reference for one asset, with its age. */
 export interface NavState {
   assetToken: string;
@@ -484,6 +503,27 @@ export const api = {
     request<{ txHash: string }>('/api/admin/kyc', { method: 'POST', body }),
 
   nav: (token: string) => request<NavState>(`/api/nav/${token}`),
+
+  batchParams: () => request<BatchParamsResponse>('/api/batch/params'),
+
+  batchAccount: (evm: string) =>
+    request<{ evmAddress: string; accountId: string }>(`/api/batch/account/${evm}`),
+
+  /**
+   * Path B. The buyer has already signed a native HTS transfer of their own
+   * cash; the venue verifies it matches the trade, wraps it with the delivery
+   * call, and submits the pair atomically.
+   */
+  settleBatch: (
+    id: string,
+    body: { trade: Trade; sellerSig: string; buyerSig: string; innerCashTxBase64: string }
+  ) => request<BatchSettleResponse>(`/api/rfq/${id}/settle-batch`, { method: 'POST', body })
+    .then((result) => {
+      if (result.status === 'FAILED') {
+        throw new SottoError('SETTLEMENT_REVERTED', result.reason ?? ERROR_COPY.SETTLEMENT_REVERTED);
+      }
+      return result;
+    }),
 
   publishNav: (body: { assetToken: string; price: string; decimals?: number }) =>
     request<{ txHash: string; assetToken: string; nav: NavState }>('/api/admin/nav', {

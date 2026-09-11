@@ -16,8 +16,8 @@ value. Never paste a private key into the browser, a screen recording, an issue,
 | Browse the venue, rulebook, public HCS audit and deployed contracts | Yes | Yes |
 | Enter a clearly labelled funded demo desk | Yes | Yes |
 | Path A: EVM wallet, exact USDC allowance, EIP-712 signatures and atomic DvP | Yes | Yes |
-| Path B: connect a Hedera-native HIP-820 wallet | Yes, connection preview | Yes |
-| Path B: sign and submit the RFQ batch from the browser | Not yet | Yes, `settle-batch.ts` |
+| Path B: connect a Hedera-native HIP-820 wallet | Yes | Yes |
+| Path B: sign the cash leg and settle the batch from the browser | Yes, pending a wallet check | Yes, `settle-batch.ts` |
 | Issue more units of a deployed ATS security | Local issuer demo only | Yes |
 | Publish the reference NAV the settlement band checks against | Yes, issuer portal | Yes |
 | Redemption at maturity: principal paid, then units burned | Yes, issuer portal | Yes, `redeem-demo.ts` |

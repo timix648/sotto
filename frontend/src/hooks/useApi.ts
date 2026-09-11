@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import {
   api, type Health, type RfqDetail, type Balances, type Asset,
-  type NavState, type LifecycleState,
+  type NavState, type LifecycleState, type BatchParamsResponse,
 } from '@/lib/api';
 import { socket, type WsStatus } from '@/lib/ws';
 import type { Rfq, RfqStatus, WsFrame } from '@sotto/shared';
@@ -22,6 +22,7 @@ export const qk = {
   balances: (account: string) => ['balances', account.toLowerCase()] as const,
   assets: ['assets'] as const,
   nav: (token: string) => ['nav', token.toLowerCase()] as const,
+  batchParams: ['batch', 'params'] as const,
   lifecycle: (token: string, holder: string) =>
     ['lifecycle', token.toLowerCase(), holder.toLowerCase()] as const,
 };
@@ -52,6 +53,20 @@ export function useNav(token: string | null | undefined): UseQueryResult<NavStat
     enabled: Boolean(token),
     refetchInterval: 30_000,
     retry: 1,
+  });
+}
+
+/**
+ * Path B parameters. Retry is off: when the server has no operator configured
+ * this 409s every time, and hammering it would only make the UI look broken
+ * rather than say plainly that Path B is unavailable here.
+ */
+export function useBatchParams(): UseQueryResult<BatchParamsResponse> {
+  return useQuery({
+    queryKey: qk.batchParams,
+    queryFn: api.batchParams,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 
