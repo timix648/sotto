@@ -20,3 +20,8 @@ build/
 artifacts/
 cache/
 typechain-types/
+
+# Local operational files: server config, host names, anything describing our
+# own infrastructure. Not useful to a reader and not ours to publish.
+deploy/
+*.local.yml

@@ -15,6 +15,13 @@ import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
 import type { WsFrame, Rfq, Trade } from '../../packages/shared/src/types.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
+/**
+ * Bind address. Defaults to 0.0.0.0 so `npm run serve` is reachable in local
+ * development without ceremony. Behind a TLS terminator set HOST=127.0.0.1, so
+ * the proxy is the only way in — otherwise the API keeps answering plaintext on
+ * the public interface even with a certificate sitting in front of it.
+ */
+const HOST = process.env.HOST ?? '0.0.0.0';
 
 function loadEnv(): Record<string, string> {
   const out: Record<string, string> = {};
@@ -550,9 +557,9 @@ setInterval(async () => {
   } catch { /* mirror lag or transient RPC - never let the poller kill the server */ }
 }, 5000).unref();
 
-await app.listen({ port: PORT, host: '0.0.0.0' });
-console.log(`\n  Sotto API (LIVE)  ->  http://localhost:${PORT}`);
-console.log(`  websocket         ->  ws://localhost:${PORT}/ws`);
+await app.listen({ port: PORT, host: HOST });
+console.log(`\n  Sotto API (LIVE)  ->  http://${HOST}:${PORT}`);
+console.log(`  websocket         ->  ws://${HOST}:${PORT}/ws`);
 console.log(`  bond              ->  ${env.BOND_ADDRESS}`);
 console.log(`  settlement        ->  ${env.SETTLEMENT_ADDRESS}`);
 console.log(`  hcs topic         ->  ${hcs.topicId}\n`);
