@@ -21,7 +21,7 @@ import { useHealth, useAssets, useBalances, useRfqs, useRfq, useRfqSubscription,
 import { useRole } from '@/hooks/useRole';
 import { api, errorCopy } from '@/lib/api';
 import { useSignTrade } from '@/lib/sign';
-import { holdAbi, releaseHoldAbi, DEFAULT_HOLD_SECONDS } from '@/lib/ats';
+import { holdAbi, holdReadAbi, releaseHoldAbi, DEFAULT_HOLD_SECONDS } from '@/lib/ats';
 import { formatQty, formatPrice, parseAmount } from '@/lib/format';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePublicClient, useWriteContract } from 'wagmi';
@@ -298,11 +298,15 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
   // Not while quotes are still being collected or opened: a seller who pulls the
   // escrow mid-auction has wasted every dealer's commit. Once the book is
   // allocated the remainder is theirs to take back.
+  //
+  // Deliberately not gated on unfilled > 0. A request can read unfilled 0 and
+  // still hold every unit, because an awarded fill only leaves the escrow when
+  // it settles - which is exactly the case a seller most needs this button for.
+  // How much there is to release is read from the hold when the button is used.
   const canRelease =
     isWallet
     && address?.toLowerCase() === current.seller.toLowerCase()
     && current.holdId != null
-    && BigInt(current.unfilled) > 0n
     && current.status !== 'OPEN'
     && current.status !== 'REVEALING';
 
@@ -334,6 +338,27 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
     setReleasing(true);
     setError(null);
     try {
+      // Release what the HOLD still contains, not what the engine calls
+      // unfilled. Those differ whenever a fill was awarded and never settled:
+      // the units are allocated in the book but have not left the escrow, so an
+      // RFQ reading filled 23 / unfilled 2 can still be sitting on all 25.
+      // Releasing `unfilled` there frees 2 and strands 23. The hold is the
+      // truth - executeHoldByPartition decrements it as fills actually settle.
+      const [heldNow] = await publicClient.readContract({
+        address: getAddress(current.assetToken),
+        abi: holdReadAbi,
+        functionName: 'getHoldForByPartition',
+        args: [{
+          partition: current.partition as Hex,
+          tokenHolder: getAddress(current.seller),
+          holdId: BigInt(current.holdId),
+        }],
+      });
+      if (heldNow === 0n) {
+        setError('This hold is already empty — nothing is escrowed against this request.');
+        return;
+      }
+
       const simulation = await publicClient.simulateContract({
         address: getAddress(health.settlementAddress),
         abi: releaseHoldAbi,
@@ -343,7 +368,7 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
           current.partition as Hex,
           getAddress(current.seller),
           BigInt(current.holdId),
-          BigInt(current.unfilled),
+          heldNow,
         ],
         account: getAddress(address),
       });
@@ -410,8 +435,8 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
               disabled={releasing}
               title={
                 unsettledFills > 0
-                  ? 'Returns the unfilled remainder to your available balance. Fills already awarded and not yet settled are cancelled.'
-                  : 'Returns the unfilled remainder to your available balance, without waiting out the 48-hour hold.'
+                  ? `Returns everything still escrowed to your available balance. ${unsettledFills} awarded fill${unsettledFills === 1 ? '' : 's'} not yet settled would be cancelled.`
+                  : 'Returns everything still escrowed to your available balance, without waiting out the 48-hour hold.'
               }
             >
               Release escrow

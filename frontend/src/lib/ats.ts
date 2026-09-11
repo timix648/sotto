@@ -32,6 +32,41 @@ export const holdAbi = [
 ] as const;
 
 /**
+ * How much a hold still contains.
+ *
+ * Not the same as the request's unfilled remainder. A fill leaves the escrow
+ * only when it settles, so a request reading filled 23 / unfilled 2 can still
+ * be sitting on all 25 units. Before releasing anything, ask the hold.
+ */
+export const holdReadAbi = [
+  {
+    type: 'function',
+    name: 'getHoldForByPartition',
+    stateMutability: 'view',
+    inputs: [
+      {
+        name: '_holdIdentifier',
+        type: 'tuple',
+        components: [
+          { name: 'partition', type: 'bytes32' },
+          { name: 'tokenHolder', type: 'address' },
+          { name: 'holdId', type: 'uint256' },
+        ],
+      },
+    ],
+    outputs: [
+      { name: 'amount_', type: 'uint256' },
+      { name: 'expirationTimestamp_', type: 'uint256' },
+      { name: 'escrow_', type: 'address' },
+      { name: 'destination_', type: 'address' },
+      { name: 'data_', type: 'bytes' },
+      { name: 'operatorData_', type: 'bytes' },
+      { name: 'thirdPartyType_', type: 'uint8' },
+    ],
+  },
+] as const;
+
+/**
  * SottoSettlement's escrow release.
  *
  * A hold survives its RFQ: the ATS escrow runs for 48 hours regardless of what
