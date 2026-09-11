@@ -8,7 +8,10 @@
 // something the user dismissed.
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { api, type Health, type RfqDetail, type Balances, type Asset } from '@/lib/api';
+import {
+  api, type Health, type RfqDetail, type Balances, type Asset,
+  type NavState, type LifecycleState,
+} from '@/lib/api';
 import { socket, type WsStatus } from '@/lib/ws';
 import type { Rfq, RfqStatus, WsFrame } from '@sotto/shared';
 
@@ -18,6 +21,9 @@ export const qk = {
   rfq: (id: string) => ['rfq', id] as const,
   balances: (account: string) => ['balances', account.toLowerCase()] as const,
   assets: ['assets'] as const,
+  nav: (token: string) => ['nav', token.toLowerCase()] as const,
+  lifecycle: (token: string, holder: string) =>
+    ['lifecycle', token.toLowerCase(), holder.toLowerCase()] as const,
 };
 
 export function useHealth(): UseQueryResult<Health> {
@@ -32,6 +38,34 @@ export function useHealth(): UseQueryResult<Health> {
 
 export function useAssets(): UseQueryResult<Asset[]> {
   return useQuery({ queryKey: qk.assets, queryFn: api.assets, staleTime: 30_000 });
+}
+
+/**
+ * The band guard's reference, refetched often enough that its AGE stays honest
+ * on screen. A card that says "4 minutes old" while the clock has moved on is
+ * worse than no card.
+ */
+export function useNav(token: string | null | undefined): UseQueryResult<NavState> {
+  return useQuery({
+    queryKey: qk.nav(token ?? ''),
+    queryFn: () => api.nav(token as string),
+    enabled: Boolean(token),
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
+export function useLifecycle(
+  token: string | null | undefined,
+  holder: string | null | undefined
+): UseQueryResult<LifecycleState> {
+  return useQuery({
+    queryKey: qk.lifecycle(token ?? '', holder ?? ''),
+    queryFn: () => api.lifecycle(token as string, holder as string),
+    enabled: Boolean(token && holder),
+    refetchInterval: 20_000,
+    retry: 1,
+  });
 }
 
 export function useRfqs(status?: RfqStatus): UseQueryResult<Rfq[]> {

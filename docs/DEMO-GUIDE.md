@@ -18,8 +18,22 @@ value. Never paste a private key into the browser, a screen recording, an issue,
 | Path A: EVM wallet, exact USDC allowance, EIP-712 signatures and atomic DvP | Yes | Yes |
 | Path B: connect a Hedera-native HIP-820 wallet | Yes, connection preview | Yes |
 | Path B: sign and submit the RFQ batch from the browser | Not yet | Yes, `settle-batch.ts` |
-| Issue more units of the deployed ATS bond | Local issuer demo only | Yes |
+| Issue more units of a deployed ATS security | Local issuer demo only | Yes |
+| Publish the reference NAV the settlement band checks against | Yes, issuer portal | Yes |
+| Redemption at maturity: principal paid, then units burned | Yes, issuer portal | Yes, `redeem-demo.ts` |
 | Deploy a brand-new bond instrument | Operator script, not the venue UI | Yes |
+
+**The reference NAV expires, and that is the point.** `SottoNavOracle` refuses a reference
+older than its bound (24 hours), so a venue left alone for a day will refuse to settle anything
+until an administrator republishes. The issuer portal shows the reference's age and a
+**Publish NAV** button, so a stale guard reads as a stated reason rather than a mystery revert.
+Nothing republishes on a timer: an automated re-stamp of an unchanging number would leave the
+staleness bound looking intact on-chain while making it impossible for it ever to fire.
+
+**A demo can drain itself.** Cash flows dealer to seller and units flow seller to dealer, so
+repeated runs move both one way. Check the balances on the desk before recording, and reload
+the short-dated note from the issuer portal before demonstrating redemption twice - redemption
+burns the holder's whole position.
 
 That distinction is deliberate. The interface never labels the script-backed Path B handoff as
 a completed browser settlement.

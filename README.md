@@ -329,6 +329,11 @@ totalSupply    10 -> 0
 holder cash    47.373000 -> 57.373000 USDC
 ```
 
+Both legs are also a button. The issuer portal pays the principal and calls
+`fullRedeemAtMaturity` against the short-dated note, so the last leg of the lifecycle does not
+need a terminal. The portal refuses to offer the burn when the issuer cannot cover the
+principal, for the reason above.
+
 ### And then without us
 
 `schedule-redeem-demo.ts` hands the same redemption to the network. `SottoCouponScheduler`
@@ -489,6 +494,14 @@ npx tsx backend/src/scripts/deploy-price-source.ts
 ## Known limitations
 
 We would rather write these down than have you find them.
+
+**The reference NAV expires, deliberately.** `SottoNavOracle` refuses a reference older than
+its bound, so a venue left alone for a day refuses to settle anything until an administrator
+republishes. The issuer portal shows the reference's age and publishes on a click, so the guard
+reads as a stated reason rather than a mystery revert. Nothing republishes on a timer: an
+automated re-stamp of an unchanging number would leave the bound looking intact on-chain while
+making it impossible for it ever to fire — a weaker guarantee than 24 hours, and an invisible
+one.
 
 **No coupon has actually been paid.** `SottoCouponScheduler` schedules and the network
 executes — proven, with a real state change, by the scheduled `fullRedeemAtMaturity` that

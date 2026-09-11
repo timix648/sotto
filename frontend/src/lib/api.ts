@@ -62,6 +62,50 @@ export function errorCopy(e: unknown): string {
 // endpoints in §3.4 return around it. Fields the blueprint does not promise are
 // optional, so a missing one degrades a panel instead of throwing.
 
+/** The band guard's reference for one asset, with its age. */
+export interface NavState {
+  assetToken: string;
+  price: string | null;
+  decimals: number;
+  updatedAt: number | null;
+  ageSeconds: number | null;
+  fresh: boolean;
+  maxAge: number;
+  source: 'administrator' | 'market-feed' | 'none';
+  priceSource: string | null;
+  oracle: string;
+}
+
+/** Redemption state for one holder of one bond. */
+export interface LifecycleState {
+  assetToken: string;
+  symbol: string;
+  name: string;
+  currency: string;
+  nominalValue: string;
+  nominalValueDecimals: number;
+  maturityDate: number;
+  matured: boolean;
+  secondsToMaturity: number;
+  totalSupply: string;
+  holder: string;
+  holderUnits: string;
+  holderKyc: 'GRANTED' | 'NOT_GRANTED';
+  principalDue: string;
+  issuerCash: string;
+  issuerCanPay: boolean;
+}
+
+export interface RedeemResult {
+  cashTxHash: string | null;
+  redeemTxHash: string;
+  unitsBurned: string;
+  principalPaid: string;
+  assetToken: string;
+  holder: string;
+  lifecycle: LifecycleState;
+}
+
 export interface Health {
   ok: boolean;
   network: string;
@@ -438,4 +482,17 @@ export const api = {
 
   kyc: (body: { assetToken: string; account: string; granted: boolean }) =>
     request<{ txHash: string }>('/api/admin/kyc', { method: 'POST', body }),
+
+  nav: (token: string) => request<NavState>(`/api/nav/${token}`),
+
+  publishNav: (body: { assetToken: string; price: string; decimals?: number }) =>
+    request<{ txHash: string; assetToken: string; nav: NavState }>('/api/admin/nav', {
+      method: 'POST', body,
+    }),
+
+  lifecycle: (token: string, holder?: string) =>
+    request<LifecycleState>(`/api/lifecycle/${token}${holder ? `?holder=${holder}` : ''}`),
+
+  redeem: (body: { assetToken?: string; holder?: string }) =>
+    request<RedeemResult>('/api/admin/redeem', { method: 'POST', body }),
 };

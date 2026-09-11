@@ -11,7 +11,7 @@
 // issuance parameters — they are set after creation via `Bond.setCoupon()`, so
 // issuance is two steps. Showing them as one form would misrepresent the
 // contract and produce a confusing failure.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, Empty } from '@/components/ui/Panel';
@@ -20,11 +20,14 @@ import { Field, Input, Select, Callout } from '@/components/ui/Field';
 import { Addr, HashScanLink } from '@/components/ui/Addr';
 import { PageHead } from '@/components/layout/PageHead';
 import { Shell } from '@/components/layout/Shell';
-import { useHealth, useAssets, qk } from '@/hooks/useApi';
+import { useHealth, useAssets, useNav, useLifecycle, qk } from '@/hooks/useApi';
 import { useRole } from '@/hooks/useRole';
-import { api, errorCopy, type Asset, type Health } from '@/lib/api';
+import { api, errorCopy, type Asset, type Health, type RedeemResult } from '@/lib/api';
 import { hashscan } from '@/lib/hashscan';
-import { formatDate, formatCash, formatPct, formatQty } from '@/lib/format';
+import {
+  formatDate, formatCash, formatPct, formatQty, formatPrice, formatClock,
+  countdown, parseAmount, toInputValue,
+} from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 export default function IssuerPage() {
@@ -60,6 +63,12 @@ export default function IssuerPage() {
         <div className="lg:col-span-3 space-y-4">
           <KycPanel assets={assets} health={health} enabled={issuerDemo} />
           <IssueForm asset={asset} accounts={health?.accounts} enabled={issuerDemo} />
+          <NavPanel
+            asset={asset}
+            health={health}
+            cashDecimals={health?.cashDecimals ?? 6}
+            enabled={issuerDemo}
+          />
         </div>
 
         <div className="lg:col-span-2 space-y-4">
@@ -67,6 +76,8 @@ export default function IssuerPage() {
           <CouponSchedule asset={asset} cashDecimals={health?.cashDecimals ?? 6} />
         </div>
       </div>
+
+      <RedemptionPanel health={health} cashDecimals={health?.cashDecimals ?? 6} enabled={issuerDemo} />
     </Shell>
   );
 }
@@ -283,6 +294,405 @@ function IssueForm({
       )}
     </Panel>
   );
+}
+
+// ------------------------------------------------------- the band reference
+
+/**
+ * The NAV the settlement band checks against, and how old it is.
+ *
+ * This panel exists because the guard was previously INVISIBLE until it fired.
+ * A reference older than the oracle's maxAge makes every settlement revert at
+ * about 59,000 gas with nothing readable in the message - which looks like a
+ * broken venue rather than a control doing its job. Showing the age up front
+ * turns a mystery revert into a stated reason, and publishing is one click.
+ *
+ * Nothing republishes on a timer, deliberately. An automated re-stamp of an
+ * unchanging number would leave the staleness bound looking intact on-chain
+ * while making it impossible for it ever to fire - a weaker guarantee than the
+ * 24h bound, and an invisible one. A fund administrator strikes a NAV and
+ * publishes it. This is that, with a button.
+ */
+function NavPanel({
+  asset, health, cashDecimals, enabled,
+}: {
+  asset: Asset | null;
+  health: Health | undefined;
+  cashDecimals: number;
+  enabled: boolean;
+}) {
+  const qc = useQueryClient();
+  const token = asset?.token ?? health?.bondAddress ?? null;
+  const { data: nav, isLoading } = useNav(token);
+  const [price, setPrice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [published, setPublished] = useState<string | null>(null);
+
+  // Prefill with whatever is on-chain, so republishing an unchanged NAV - the
+  // common case - is a single click with nothing to retype.
+  const current = nav?.price ? toInputValue(nav.price, nav.decimals ?? cashDecimals) : '';
+  const value = price || current;
+  const parsed = (() => {
+    try {
+      const raw = parseAmount(value, nav?.decimals ?? cashDecimals);
+      return BigInt(raw) > 0n ? raw : null;
+    } catch { return null; }
+  })();
+
+  const marketFed = nav?.source === 'market-feed';
+  const stale = Boolean(nav && !nav.fresh);
+
+  async function publish() {
+    if (!enabled || !token || !parsed) return;
+    setBusy(true);
+    setError(null);
+    setPublished(null);
+    try {
+      const res = await api.publishNav({
+        assetToken: token, price: parsed, decimals: nav?.decimals ?? cashDecimals,
+      });
+      setPublished(res.txHash);
+      setPrice('');
+      qc.invalidateQueries({ queryKey: qk.nav(token) });
+    } catch (e) {
+      setError(errorCopy(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Reference NAV"
+      subtitle="The price the settlement band checks every trade against. A reference older than the bound is refused on-chain, so no trade can settle until it is republished."
+      tone={stale ? 'danger' : 'default'}
+      right={
+        nav && (
+          <span className={cn('text-2xs uppercase tracking-wider', nav.fresh ? 'text-pos' : 'text-neg')}>
+            {nav.fresh ? 'fresh' : 'stale'}
+          </span>
+        )
+      }
+    >
+      {isLoading && <p className="text-sm text-dim">Reading the oracle…</p>}
+
+      {nav && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <span className="label">reference</span>
+              <div className="num text-lg text-txt">
+                {nav.price ? formatPrice(nav.price, nav.decimals) : '—'}
+              </div>
+              <div className="mt-0.5 text-2xs text-dim">per 100 nominal</div>
+            </div>
+            <div>
+              <span className="label">age</span>
+              <div className={cn('num text-lg', nav.fresh ? 'text-txt' : 'text-neg')}>
+                {nav.ageSeconds == null ? '—' : formatAge(nav.ageSeconds)}
+              </div>
+              <div className="mt-0.5 text-2xs text-dim">
+                bound {formatAge(nav.maxAge)}
+              </div>
+            </div>
+            <div>
+              <span className="label">source</span>
+              <div className="text-sm text-txt mt-1">
+                {nav.source === 'market-feed' ? 'Chainlink feed' :
+                 nav.source === 'administrator' ? 'Administrator' : 'None published'}
+              </div>
+              {nav.updatedAt != null && (
+                <div className="mt-0.5 text-2xs text-dim num">{formatClock(nav.updatedAt)}</div>
+              )}
+            </div>
+          </div>
+
+          {stale && (
+            <div className="mt-4">
+              <Callout tone="neg" title="Trading is blocked until this is republished">
+                The band guard refuses a reference older than {formatAge(nav.maxAge)}. A settlement
+                attempted now reverts on-chain with both ledgers untouched — that is the control
+                working, not a fault.
+              </Callout>
+            </div>
+          )}
+
+          {marketFed && (
+            <div className="mt-4">
+              <Callout tone="muted" title="This asset is priced by a market feed">
+                A configured <span className="font-mono">IPriceSource</span> wins over an
+                administrator publication, so the band reads Chainlink for this asset and
+                publishing here has no effect on it.
+              </Callout>
+            </div>
+          )}
+
+          {!marketFed && (
+            <>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Publish NAV"
+                  suffix="per 100"
+                  hint="A bond's NAV comes from the administrator, not a price feed."
+                  error={value && !parsed ? 'Must be a positive number.' : null}
+                >
+                  <Input
+                    value={value}
+                    onChange={(e) => setPrice(e.target.value)}
+                    inputMode="decimal"
+                    invalid={Boolean(value) && !parsed}
+                  />
+                </Field>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-2xs text-dim max-w-md leading-relaxed">
+                  Calls <span className="font-mono">publishNav</span> on the deployed oracle. It
+                  cannot move funds — the band can only ever refuse a trade.
+                </p>
+                <Button
+                  variant={stale ? 'primary' : 'ghost'}
+                  onClick={publish}
+                  busy={busy}
+                  disabled={!enabled || !parsed || busy}
+                >
+                  Publish NAV
+                </Button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {published && (
+        <div className="mt-3">
+          <Callout tone="pos" title="Published — the band has a fresh reference">
+            <Addr value={published} kind="hash" href={hashscan.tx(published)} />
+          </Callout>
+        </div>
+      )}
+      {error && (
+        <div className="mt-3">
+          <Callout tone="neg" title="The NAV was not published">{error}</Callout>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------- redemption at maturity
+
+/**
+ * The last leg of the bond lifecycle, on a button.
+ *
+ * Two things this has to say out loud, because both are properties rather than
+ * quirks. Maturity is a HARD on-chain gate: fullRedeemAtMaturity is guarded by
+ * onlyAfterCurrentMaturityDate, so an early redemption is refused by the chain,
+ * not by us. And maturity only ever moves FORWARD, which is why this runs
+ * against a short-dated note rather than the 2030 senior bond - that one can
+ * never be matured early by anybody, including the issuer.
+ *
+ * The principal is paid BEFORE the units are burned. ATS burns and does not
+ * move money, so paying second would let a failure leave a holder with neither
+ * units nor cash.
+ */
+function RedemptionPanel({
+  health, cashDecimals, enabled,
+}: {
+  health: Health | undefined;
+  cashDecimals: number;
+  enabled: boolean;
+}) {
+  const qc = useQueryClient();
+  const token = health?.shortBondAddress ?? null;
+  const parties = [
+    { label: 'Seller', address: health?.accounts?.seller },
+    { label: 'Dealer', address: health?.accounts?.dealer },
+    { label: 'Issuer', address: health?.accounts?.issuer },
+  ].filter((p): p is { label: string; address: string } => Boolean(p.address));
+
+  const [holder, setHolder] = useState('');
+  const target = holder || parties[0]?.address || '';
+  const { data: life } = useLifecycle(token, target);
+
+  const [busy, setBusy] = useState<'issue' | 'redeem' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<RedeemResult | null>(null);
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const units = (() => { try { return BigInt(life?.holderUnits ?? '0'); } catch { return 0n; } })();
+  const canRedeem = Boolean(enabled && life?.matured && units > 0n && life?.issuerCanPay && !busy);
+
+  function refresh() {
+    if (token) qc.invalidateQueries({ queryKey: qk.lifecycle(token, target) });
+    qc.invalidateQueries({ queryKey: qk.assets });
+  }
+
+  async function reload() {
+    if (!enabled || !token) return;
+    setBusy('issue');
+    setError(null);
+    try {
+      // Redemption burns the holder's whole position, so a second run needs the
+      // note reloaded. Issuing is the issuer's own call, same as anywhere else.
+      await api.issue({ assetToken: token, to: target, amount: '10' });
+      refresh();
+    } catch (e) {
+      setError(errorCopy(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function redeem() {
+    if (!canRedeem || !token) return;
+    setBusy('redeem');
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.redeem({ assetToken: token, holder: target });
+      setResult(res);
+      refresh();
+    } catch (e) {
+      setError(errorCopy(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!token) return null;
+
+  return (
+    <Panel
+      title="Redemption at maturity"
+      subtitle="Issuance, trading and redemption — the third leg. The units are burned by ATS against the maturity date; the principal is paid first, because units are the holder's claim on that cash."
+      tone={life?.matured ? 'success' : 'held'}
+      right={
+        life && (
+          <span className={cn('text-2xs uppercase tracking-wider', life.matured ? 'text-pos' : 'text-held')}>
+            {life.matured ? 'matured' : `matures in ${countdown(life.maturityDate, now)}`}
+          </span>
+        )
+      }
+    >
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3 grid gap-4 sm:grid-cols-2">
+          <Field label="Instrument" hint="A short-dated note. Maturity can only move forward, so the 2030 bond can never be matured on demand.">
+            <div className="w-full rounded-md border border-line bg-raised px-3 py-2 text-sm text-txt">
+              {life ? `${life.symbol} — ${life.name}` : 'Reading the bond…'}
+            </div>
+          </Field>
+          <Field label="Holder" hint="Every unit this account holds is redeemed.">
+            <Select value={target} onChange={(e) => setHolder(e.target.value)}>
+              {parties.map((party) => (
+                <option key={party.address} value={party.address}>
+                  {party.label} — {party.address.slice(0, 10)}…{party.address.slice(-4)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <div className="lg:col-span-2 grid grid-cols-3 gap-3 content-start">
+          <div>
+            <span className="label">units</span>
+            <div className="num text-lg text-txt">{formatQty(life?.holderUnits, 0)}</div>
+          </div>
+          <div>
+            <span className="label">principal</span>
+            <div className="num text-lg text-txt">{formatCash(life?.principalDue, cashDecimals)}</div>
+          </div>
+          <div>
+            <span className="label">maturity</span>
+            <div className="num text-sm text-muted mt-1.5">{formatDate(life?.maturityDate)}</div>
+          </div>
+        </div>
+      </div>
+
+      {life && !life.matured && (
+        <div className="mt-4">
+          <Callout tone="held" title="The chain will refuse this until the maturity date">
+            <span className="font-mono">fullRedeemAtMaturity</span> is guarded by{' '}
+            <span className="font-mono">onlyAfterCurrentMaturityDate</span>. Called early it reverts
+            with <span className="font-mono">BondMaturityDateWrong()</span> — a venue that only
+            checked maturity in its own backend would have redeemed this holder early.
+          </Callout>
+        </div>
+      )}
+
+      {life?.matured && units === 0n && (
+        <div className="mt-4">
+          <Callout tone="muted" title="Nothing to redeem">
+            This holder has no units of the note. Redemption burns the whole position, so a repeat
+            demonstration needs it reloaded first.
+          </Callout>
+        </div>
+      )}
+
+      {life && units > 0n && !life.issuerCanPay && (
+        <div className="mt-4">
+          <Callout tone="neg" title="The issuer cannot pay the principal">
+            Owed {formatCash(life.principalDue, cashDecimals)}, holding{' '}
+            {formatCash(life.issuerCash, cashDecimals)}. The burn is deliberately not offered: the
+            units are the holder&apos;s claim on that cash.
+          </Callout>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-2xs text-dim max-w-lg leading-relaxed">
+          Pays {formatCash(life?.principalDue, cashDecimals)} in{' '}
+          {life?.currency ?? 'USD'}, then calls{' '}
+          <span className="font-mono">fullRedeemAtMaturity</span>. Both legs land on the public HCS
+          audit trail.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" onClick={reload} busy={busy === 'issue'} disabled={!enabled || Boolean(busy)}>
+            Issue 10 units
+          </Button>
+          <Button variant="primary" onClick={redeem} busy={busy === 'redeem'} disabled={!canRedeem}>
+            Redeem at maturity
+          </Button>
+        </div>
+      </div>
+
+      {result && (
+        <div className="mt-3">
+          <Callout
+            tone="pos"
+            title={`Redeemed — ${formatQty(result.unitsBurned, 0)} units burned, ${formatCash(result.principalPaid, cashDecimals)} paid`}
+          >
+            <span className="inline-flex flex-wrap items-center gap-3">
+              {result.cashTxHash && (
+                <Addr value={result.cashTxHash} kind="hash" href={hashscan.tx(result.cashTxHash)} />
+              )}
+              <Addr value={result.redeemTxHash} kind="hash" href={hashscan.tx(result.redeemTxHash)} />
+            </span>
+          </Callout>
+        </div>
+      )}
+      {error && (
+        <div className="mt-3">
+          <Callout tone="neg" title="The redemption did not go through">{error}</Callout>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/** Human age for a span of seconds. The oracle bound is in hours, not days. */
+function formatAge(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  const hours = seconds / 3600;
+  if (hours < 48) return `${hours.toFixed(hours < 10 ? 1 : 0)}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 // ------------------------------------------------------------------- schedule

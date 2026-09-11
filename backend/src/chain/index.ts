@@ -39,6 +39,37 @@ export const CASH_ABI = [
   'function balanceOf(address) view returns (uint256)',
   'function allowance(address,address) view returns (uint256)',
   'function decimals() view returns (uint8)',
+  // The issuer pays redemption principal with a plain transfer. ATS burns the
+  // units; it does not move money, so the cash leg is ours to make.
+  'function transfer(address,uint256) returns (bool)',
+];
+
+export const NAV_ORACLE_ABI = [
+  'function referenceFor(address) view returns (uint256,uint64,uint8)',
+  'function hasReference(address) view returns (bool)',
+  'function isFresh(address) view returns (bool)',
+  'function maxAge() view returns (uint64)',
+  'function priceSource(address) view returns (address)',
+  'function publishNav(address,uint256,uint8)',
+];
+
+/**
+ * The Bond facet's maturity surface. ATS v3.1.0 role hashes and guards - see
+ * docs/ATS-SPIKE.md, "Redemption at maturity, and why maturity only moves
+ * forward". fullRedeemAtMaturity is gated on
+ * onlyAfterCurrentMaturityDate(_blockTimestamp()), so an early call reverts
+ * with BondMaturityDateWrong() (selector 0x67d08758) rather than succeeding.
+ */
+export const BOND_LIFECYCLE_ABI = [
+  'function getBondDetails() view returns ((bytes3 currency,uint256 nominalValue,uint8 nominalValueDecimals,uint256 startingDate,uint256 maturityDate))',
+  'function getPrincipalFor(address) view returns ((uint256 numerator,uint256 denominator))',
+  'function fullRedeemAtMaturity(address)',
+  'function balanceOfByPartition(bytes32,address) view returns (uint256)',
+  'function balanceOf(address) view returns (uint256)',
+  'function totalSupply() view returns (uint256)',
+  'function symbol() view returns (string)',
+  'function name() view returns (string)',
+  'function getKycStatusFor(address) view returns (uint8)',
 ];
 
 export interface ChainConfig {
@@ -48,6 +79,47 @@ export interface ChainConfig {
   settlementAddress: string;
   cashAddress: string;
   issuerKey: string;
+  /** SottoNavOracle. Absent = the band guard is not configured. */
+  navOracleAddress?: string;
+  /** Short-dated note used for the redemption demo. */
+  shortBondAddress?: string;
+}
+
+/** What the issuer portal needs to render the band guard honestly. */
+export interface NavState {
+  assetToken: string;
+  /** Null when no reference has ever been published for this asset. */
+  price: string | null;
+  decimals: number;
+  updatedAt: number | null;
+  ageSeconds: number | null;
+  fresh: boolean;
+  maxAge: number;
+  /** A configured IPriceSource wins over the published NAV - see the oracle. */
+  source: 'administrator' | 'market-feed' | 'none';
+  priceSource: string | null;
+  oracle: string;
+}
+
+/** Redemption state for one holder of one bond. */
+export interface LifecycleState {
+  assetToken: string;
+  symbol: string;
+  name: string;
+  currency: string;
+  nominalValue: string;
+  nominalValueDecimals: number;
+  maturityDate: number;
+  matured: boolean;
+  secondsToMaturity: number;
+  totalSupply: string;
+  holder: string;
+  holderUnits: string;
+  holderKyc: 'GRANTED' | 'NOT_GRANTED';
+  /** units x nominalValue, in cash base units. */
+  principalDue: string;
+  issuerCash: string;
+  issuerCanPay: boolean;
 }
 
 /** Total / Available / Held / Locked - the four numbers B2's card animates. */
@@ -71,6 +143,7 @@ export class Chain {
   readonly bond: ethers.Contract;
   readonly settlement: ethers.Contract;
   readonly cash: ethers.Contract;
+  readonly navOracle: ethers.Contract | null;
 
   constructor(readonly cfg: ChainConfig) {
     this.provider = new ethers.JsonRpcProvider(cfg.rpcUrl);
@@ -78,6 +151,9 @@ export class Chain {
     this.bond = new ethers.Contract(cfg.bondAddress, BOND_ABI, this.issuer);
     this.settlement = new ethers.Contract(cfg.settlementAddress, SETTLEMENT_ABI, this.issuer);
     this.cash = new ethers.Contract(cfg.cashAddress, CASH_ABI, this.provider);
+    this.navOracle = cfg.navOracleAddress
+      ? new ethers.Contract(cfg.navOracleAddress, NAV_ORACLE_ABI, this.issuer)
+      : null;
   }
 
   /**
@@ -179,5 +255,170 @@ export class Chain {
 
   async blockHeight(): Promise<number> {
     return this.provider.getBlockNumber();
+  }
+
+  // ----------------------------------------------------------- NAV / band
+
+  /**
+   * Read the band guard's reference for an asset.
+   *
+   * `referenceFor` REVERTS when nothing has been published and no market source
+   * is configured, so the absence of a reference is an exception, not a zero.
+   * Surfacing that difference is the whole point of this call: a settlement
+   * against a stale or missing reference reverts at ~59,000 gas with nothing
+   * useful in the message, which reads as a broken app rather than a working
+   * control. The portal shows the age so the refusal is legible BEFORE anyone
+   * signs anything.
+   */
+  async navState(assetToken: string): Promise<NavState | null> {
+    if (!this.navOracle) return null;
+    const oracle = this.navOracle;
+    const [maxAge, priceSource] = await Promise.all([
+      oracle.maxAge() as Promise<bigint>,
+      oracle.priceSource(assetToken) as Promise<string>,
+    ]);
+    const hasSource = priceSource !== ethers.ZeroAddress;
+
+    const base = {
+      assetToken,
+      maxAge: Number(maxAge),
+      priceSource: hasSource ? priceSource : null,
+      oracle: this.cfg.navOracleAddress as string,
+    };
+
+    try {
+      const [price, updatedAt, decimals] = await oracle.referenceFor(assetToken);
+      const age = Math.floor(Date.now() / 1000) - Number(updatedAt);
+      return {
+        ...base,
+        price: (price as bigint).toString(),
+        decimals: Number(decimals),
+        updatedAt: Number(updatedAt),
+        ageSeconds: age,
+        fresh: age <= Number(maxAge),
+        source: hasSource ? 'market-feed' : 'administrator',
+      };
+    } catch {
+      // NoReference, or a market source that refused (stale round, bad answer).
+      return {
+        ...base,
+        price: null,
+        decimals: 6,
+        updatedAt: null,
+        ageSeconds: null,
+        fresh: false,
+        source: hasSource ? 'market-feed' : 'none',
+      };
+    }
+  }
+
+  /**
+   * Publish an administrator NAV. This is the ordinary act the oracle is
+   * designed around - a fund administrator strikes a NAV and publishes it - and
+   * it is deliberately a deliberate act. Nothing here republishes on a timer:
+   * an automated re-stamp of a constant would leave the staleness guard looking
+   * intact on-chain while making it impossible for it to ever fire.
+   */
+  async publishNav(assetToken: string, price: bigint, decimals: number): Promise<string> {
+    if (!this.navOracle) throw new Error('no NAV oracle configured');
+    const tx = await this.navOracle.publishNav(assetToken, price, decimals, { gasLimit: 1_000_000 });
+    await tx.wait();
+    return tx.hash;
+  }
+
+  // ------------------------------------------------------------ redemption
+
+  /** The short-dated note, unless a specific token is asked for. */
+  redemptionToken(assetToken?: string | null): string {
+    const token = assetToken || this.cfg.shortBondAddress || this.cfg.bondAddress;
+    return ethers.getAddress(token);
+  }
+
+  async lifecycleState(assetToken: string, holder: string): Promise<LifecycleState> {
+    const bond = new ethers.Contract(assetToken, BOND_LIFECYCLE_ABI, this.provider);
+    const [details, symbol, name, totalSupply, holderUnits, kyc, issuerCash] = await Promise.all([
+      bond.getBondDetails(),
+      bond.symbol() as Promise<string>,
+      bond.name() as Promise<string>,
+      bond.totalSupply() as Promise<bigint>,
+      bond.balanceOfByPartition(PARTITION_DEFAULT, holder) as Promise<bigint>,
+      bond.getKycStatusFor(holder) as Promise<bigint>,
+      this.cash.balanceOf(this.issuer.address) as Promise<bigint>,
+    ]);
+
+    const maturityDate = Number(details.maturityDate);
+    const now = Math.floor(Date.now() / 1000);
+    // Principal is units x nominalValue in the bond's own currency. The chain
+    // agrees: getPrincipalFor returns the same figure as numerator/denominator.
+    const principalDue = (holderUnits as bigint) * (details.nominalValue as bigint);
+
+    return {
+      assetToken,
+      symbol,
+      name,
+      currency: Buffer.from(String(details.currency).slice(2), 'hex').toString('utf8'),
+      nominalValue: (details.nominalValue as bigint).toString(),
+      nominalValueDecimals: Number(details.nominalValueDecimals),
+      maturityDate,
+      matured: now >= maturityDate,
+      secondsToMaturity: maturityDate - now,
+      totalSupply: (totalSupply as bigint).toString(),
+      holder,
+      holderUnits: (holderUnits as bigint).toString(),
+      holderKyc: kyc === 1n ? 'GRANTED' : 'NOT_GRANTED',
+      principalDue: principalDue.toString(),
+      issuerCash: (issuerCash as bigint).toString(),
+      issuerCanPay: (issuerCash as bigint) >= principalDue,
+    };
+  }
+
+  /**
+   * Redeem a holder out at maturity: pay the principal, THEN burn the units.
+   *
+   * The order is not cosmetic. ATS burns units and does not move money, so if
+   * the cash leg were second a failure there would leave a holder with nothing
+   * -- no units and no payment. Paid first, a holder who is not paid still
+   * holds their claim.
+   */
+  async redeemAtMaturity(assetToken: string, holder: string): Promise<{
+    cashTxHash: string | null;
+    redeemTxHash: string;
+    unitsBurned: string;
+    principalPaid: string;
+  }> {
+    const state = await this.lifecycleState(assetToken, holder);
+    if (!state.matured) {
+      throw new Error(
+        `the bond matures ${new Date(state.maturityDate * 1000).toISOString()}; ` +
+        'fullRedeemAtMaturity reverts with BondMaturityDateWrong() before then'
+      );
+    }
+    if (state.holderUnits === '0') throw new Error('the holder has no units to redeem');
+    if (!state.issuerCanPay) {
+      throw new Error(
+        `the issuer holds ${state.issuerCash} cash base units but owes ${state.principalDue}; ` +
+        'the burn is deliberately not run, because the units are the holder\'s claim on that cash'
+      );
+    }
+
+    const principal = BigInt(state.principalDue);
+    let cashTxHash: string | null = null;
+    if (principal > 0n) {
+      const cashWriter = this.cash.connect(this.issuer) as ethers.Contract;
+      const payTx = await cashWriter.transfer(holder, principal, { gasLimit: 1_000_000 });
+      await payTx.wait();
+      cashTxHash = payTx.hash;
+    }
+
+    const bond = new ethers.Contract(assetToken, BOND_LIFECYCLE_ABI, this.issuer);
+    const tx = await bond.fullRedeemAtMaturity(holder, { gasLimit: 4_000_000 });
+    await tx.wait();
+
+    return {
+      cashTxHash,
+      redeemTxHash: tx.hash,
+      unitsBurned: state.holderUnits,
+      principalPaid: principal.toString(),
+    };
   }
 }

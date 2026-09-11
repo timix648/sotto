@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { ethers } from 'ethers';
 import { HcsAudit } from './hcs/client.js';
 import { RfqEngine, RfqError } from './rfq/engine.js';
-import { Chain, PARTITION_DEFAULT } from './chain/index.js';
+import { Chain, PARTITION_DEFAULT, BOND_ABI as ISSUE_ABI } from './chain/index.js';
 import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
 import type { WsFrame, Rfq, Trade } from '../../packages/shared/src/types.js';
 
@@ -36,6 +36,8 @@ const chain = new Chain({
   settlementAddress: env.SETTLEMENT_ADDRESS,
   cashAddress: CASH,
   issuerKey: env.ISSUER_PRIVATE_KEY,
+  navOracleAddress: env.NAV_ORACLE_ADDRESS,
+  shortBondAddress: env.SHORT_BOND_ADDRESS,
 });
 
 const hcs = new HcsAudit({
@@ -307,14 +309,107 @@ app.post('/api/admin/kyc', async (req) => {
   return { txHash, account: b.account, granted: b.granted, status: await chain.kycStatus(b.account) };
 });
 
+/**
+ * The band guard's reference for an asset, with its age.
+ *
+ * This exists so a stale reference is visible BEFORE anyone signs. Without it
+ * the first sign of trouble is a settlement reverting at ~59,000 gas with
+ * nothing readable in the message, which looks like a broken venue rather than
+ * a working control.
+ */
+app.get('/api/nav/:token', async (req) => {
+  const { token } = req.params as { token: string };
+  const state = await chain.navState(token === 'default' ? env.BOND_ADDRESS : token);
+  if (!state) throw new RfqError('SETTLEMENT_REVERTED', 'no NAV oracle is configured');
+  return state;
+});
+
+/**
+ * Publish an administrator NAV.
+ *
+ * Deliberately a deliberate act, and deliberately not on a timer. An automated
+ * re-stamp of an unchanging number would leave the staleness guard looking
+ * intact on-chain while making it impossible for it ever to fire - a weaker
+ * control than the 24h bound, and an invisible one. A fund administrator
+ * strikes a NAV and publishes it; this is that.
+ */
+app.post('/api/admin/nav', async (req) => {
+  const b = (req.body ?? {}) as { assetToken?: string; price?: string; decimals?: number };
+  const assetToken = b.assetToken || env.BOND_ADDRESS;
+  if (!b.price) throw new RfqError('SETTLEMENT_REVERTED', 'a price is required');
+
+  let price: bigint;
+  try {
+    price = BigInt(b.price);
+  } catch {
+    throw new RfqError('SETTLEMENT_REVERTED', 'price must be an integer in cash base units');
+  }
+  if (price <= 0n) throw new RfqError('SETTLEMENT_REVERTED', 'price must be greater than zero');
+
+  const txHash = await chain.publishNav(assetToken, price, Number(b.decimals ?? 6));
+  return { txHash, assetToken, nav: await chain.navState(assetToken) };
+});
+
+/** Redemption state for one holder: maturity, units, principal owed. */
+app.get('/api/lifecycle/:token', async (req) => {
+  const { token } = req.params as { token: string };
+  const q = (req.query ?? {}) as Record<string, string>;
+  const assetToken = chain.redemptionToken(token === 'default' ? null : token);
+  const holder = q.holder || env.SELLER_ADDRESS;
+  return chain.lifecycleState(assetToken, holder);
+});
+
+/**
+ * Redeem a holder out at maturity. Principal first, then the burn - see
+ * Chain.redeemAtMaturity for why that order is load-bearing.
+ */
+app.post('/api/admin/redeem', async (req) => {
+  const b = (req.body ?? {}) as { assetToken?: string; holder?: string };
+  const assetToken = chain.redemptionToken(b.assetToken);
+  const holder = b.holder || env.SELLER_ADDRESS;
+
+  let result;
+  try {
+    result = await chain.redeemAtMaturity(assetToken, holder);
+  } catch (e) {
+    // Maturity, funding and empty-position refusals are all expected states, not
+    // server faults - surface them as 409s so the portal can explain them.
+    throw new RfqError('SETTLEMENT_REVERTED', e instanceof Error ? e.message : String(e), { assetToken, holder });
+  }
+
+  const lifecycle = await chain.lifecycleState(assetToken, holder);
+  // A redemption is a lifecycle event and belongs on the same consensus-ordered
+  // log as the trades that preceded it.
+  try {
+    await hcs.write(`redeem-${assetToken.slice(2, 10)}`, 'REDEEMED', {
+      token: assetToken,
+      holder,
+      units: result.unitsBurned,
+      principal: result.principalPaid,
+      redeemTx: result.redeemTxHash,
+      cashTx: result.cashTxHash,
+    });
+  } catch { /* the redemption happened; an audit write failing must not undo it */ }
+
+  return { ...result, assetToken, holder, lifecycle };
+});
+
 app.post('/api/admin/issue', async (req) => {
-  const b = (req.body ?? {}) as { to: string; amount: string };
-  const tx = await chain.bond.issueByPartition(
+  const b = (req.body ?? {}) as { to: string; amount: string; assetToken?: string };
+  // Defaults to the primary bond. The short-dated note is a valid target too:
+  // redeeming burns its whole supply, so demonstrating redemption twice needs a
+  // way to reload it that is not a script.
+  const assetToken = b.assetToken ? ethers.getAddress(b.assetToken) : env.BOND_ADDRESS;
+  const token = assetToken.toLowerCase() === env.BOND_ADDRESS.toLowerCase()
+    ? chain.bond
+    : new ethers.Contract(assetToken, ISSUE_ABI, chain.issuer);
+
+  const tx = await token.issueByPartition(
     { partition: PARTITION_DEFAULT, tokenHolder: b.to, value: BigInt(b.amount), data: '0x' },
     { gasLimit: 3_000_000 }
   );
   await tx.wait();
-  return { assetToken: env.BOND_ADDRESS, txHash: tx.hash };
+  return { assetToken, txHash: tx.hash };
 });
 
 app.get('/ws', { websocket: true }, (socket) => {
