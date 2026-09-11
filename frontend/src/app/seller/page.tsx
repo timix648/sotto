@@ -21,7 +21,7 @@ import { useHealth, useAssets, useBalances, useRfqs, useRfq, useRfqSubscription,
 import { useRole } from '@/hooks/useRole';
 import { api, errorCopy } from '@/lib/api';
 import { useSignTrade } from '@/lib/sign';
-import { holdAbi, DEFAULT_HOLD_SECONDS } from '@/lib/ats';
+import { holdAbi, releaseHoldAbi, DEFAULT_HOLD_SECONDS } from '@/lib/ats';
 import { formatQty, formatPrice, parseAmount } from '@/lib/format';
 import { useQueryClient } from '@tanstack/react-query';
 import { usePublicClient, useWriteContract } from 'wagmi';
@@ -282,12 +282,29 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
 
   const [awarding, setAwarding] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const publicClient = usePublicClient();
+  const { writeContractAsync } = useWriteContract();
 
   useRfqSubscription(rfq.id);
 
   const nav = assets?.find((a) => a.token === rfq.assetToken)?.nav ?? null;
   const current = detail?.rfq ?? rfq;
+
+  const unsettledFills = (detail?.fills ?? []).filter(
+    (f) => !detail?.settledFillNonces.includes(f.trade.nonce)
+  ).length;
+  // Not while quotes are still being collected or opened: a seller who pulls the
+  // escrow mid-auction has wasted every dealer's commit. Once the book is
+  // allocated the remainder is theirs to take back.
+  const canRelease =
+    isWallet
+    && address?.toLowerCase() === current.seller.toLowerCase()
+    && current.holdId != null
+    && BigInt(current.unfilled) > 0n
+    && current.status !== 'OPEN'
+    && current.status !== 'REVEALING';
 
   async function closeWindow() {
     setClosing(true);
@@ -300,6 +317,45 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
       setError(errorCopy(e));
     } finally {
       setClosing(false);
+    }
+  }
+
+  // The hold outlives the request. An RFQ that expires, or one awarded to a
+  // dealer who never settled, leaves size escrowed for the full 48 hours unless
+  // the seller takes it back - which is what stranded 75 units during testing
+  // and left them uncounted as Available. The contract only lets the holder do
+  // this, so it is signed here rather than relayed by the venue.
+  async function releaseEscrow() {
+    if (!publicClient || !health?.settlementAddress || current.holdId == null) return;
+    if (!isWallet || !address || address.toLowerCase() !== current.seller.toLowerCase()) {
+      setError('Connect the seller wallet that opened this RFQ before releasing the escrow.');
+      return;
+    }
+    setReleasing(true);
+    setError(null);
+    try {
+      const simulation = await publicClient.simulateContract({
+        address: getAddress(health.settlementAddress),
+        abi: releaseHoldAbi,
+        functionName: 'releaseHold',
+        args: [
+          getAddress(current.assetToken),
+          current.partition as Hex,
+          getAddress(current.seller),
+          BigInt(current.holdId),
+          BigInt(current.unfilled),
+        ],
+        account: getAddress(address),
+      });
+      const txHash = await writeContractAsync(simulation.request);
+      await publicClient.waitForTransactionReceipt({ hash: txHash });
+      qc.invalidateQueries({ queryKey: qk.rfq(rfq.id) });
+      qc.invalidateQueries({ queryKey: ['balances'] });
+      qc.invalidateQueries({ queryKey: ['rfqs'] });
+    } catch (e) {
+      setError(errorCopy(e));
+    } finally {
+      setReleasing(false);
     }
   }
 
@@ -345,6 +401,20 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
           {current.status === 'OPEN' && now >= current.commitDeadline && (
             <Button onClick={closeWindow} busy={closing} disabled={closing}>
               Close commit window
+            </Button>
+          )}
+          {canRelease && (
+            <Button
+              onClick={releaseEscrow}
+              busy={releasing}
+              disabled={releasing}
+              title={
+                unsettledFills > 0
+                  ? 'Returns the unfilled remainder to your available balance. Fills already awarded and not yet settled are cancelled.'
+                  : 'Returns the unfilled remainder to your available balance, without waiting out the 48-hour hold.'
+              }
+            >
+              Release escrow
             </Button>
           )}
           <Link

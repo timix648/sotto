@@ -31,6 +31,31 @@ export const holdAbi = [
   },
 ] as const;
 
+/**
+ * SottoSettlement's escrow release.
+ *
+ * A hold survives its RFQ: the ATS escrow runs for 48 hours regardless of what
+ * the venue thinks, so a request that dies without filling leaves the seller's
+ * size locked until then. This is how they get it back early. Only the holder
+ * may call it - the contract checks msg.sender - so it is signed in the
+ * seller's own wallet, exactly like the hold that created it.
+ */
+export const releaseHoldAbi = [
+  {
+    type: 'function',
+    name: 'releaseHold',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'assetToken', type: 'address' },
+      { name: 'partition', type: 'bytes32' },
+      { name: 'holder', type: 'address' },
+      { name: 'holdId', type: 'uint256' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const;
+
 /** Minimal ERC-20 surface. HTS tokens expose this facade at their EVM address
  *  (HIP-218/719), which is how the Path A cash leg settles. */
 export const erc20Abi = [
