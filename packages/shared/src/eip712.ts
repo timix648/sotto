@@ -8,6 +8,21 @@ export const eip712Domain = (verifyingContract: `0x${string}`) => ({
   verifyingContract,
 });
 
+/**
+ * The domain struct's own type list.
+ *
+ * viem used to generate this for us inside `signTypedData`. We now serialise the
+ * typed data ourselves before handing it to the wallet (see frontend/src/lib/sign.ts
+ * for why), so it has to be stated. These four fields are exactly the ones
+ * `eip712Domain` above populates, in order, so the digest is unchanged.
+ */
+export const EIP712_DOMAIN_TYPE = [
+  { name: 'name',              type: 'string'  },
+  { name: 'version',           type: 'string'  },
+  { name: 'chainId',           type: 'uint256' },
+  { name: 'verifyingContract', type: 'address' },
+] as const;
+
 export const TRADE_TYPES = {
   Trade: [
     { name: 'rfqId',      type: 'bytes32' },
