@@ -295,7 +295,9 @@ Each prints before/after balances and exits non-zero if the property it asserts 
    Each reveal carries its own firmness deadline.
 
 5. Best valid, still-firm price wins. Ties break on the earliest HCS sequence number.
-   A price more than 5% from the reference NAV cannot be awarded.
+   A price more than 5% from the reference NAV can still be awarded — the
+   allocator takes no view on value — but settle() will refuse it at step 6,
+   and the block goes unfilled. The dealer portal says so before you commit.
 
 6. Both parties sign an EIP-712 Trade. settle() then, in ONE transaction:
      verify both signatures, consume nonces
