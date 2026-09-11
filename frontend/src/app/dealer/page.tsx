@@ -214,40 +214,26 @@ function DealerWorkspace({ rfqId, cashDecimals }: { rfqId: string; cashDecimals:
         />
       )}
 
+      {/*
+        One component for both routes. SettleSteps branches internally: Path A
+        shows approve-then-sign, Path B drops the approve step entirely and asks
+        for a native signature alongside the EIP-712 one. This used to be a
+        hard block telling Path B users to go back to Path A, which was true
+        when the native session was connection-only and is not any more.
+      */}
       {won && myFill && (
-        path === 'B' ? (
-          <Panel
-            title="Path B browser handoff is not live yet"
-            subtitle="The native wallet connection is ready; RFQ batch assembly remains script-backed."
-          >
-            <Callout tone="held" title="No signing prompt is expected on this screen yet">
-              The deployed delivery contract still requires EIP-712 signatures from both trade
-              parties, while the native wallet signs the HTS cash transaction. Those signatures
-              and the relayer-built HIP-551 batch are proven by the repository demo, but the
-              browser-to-relayer handoff has not been implemented. Switch to Path A on the entry
-              page to settle this award from the browser.
-            </Callout>
-            <Link
-              href="/enter"
-              className="mt-4 inline-block text-xs font-medium text-wine underline underline-offset-2 focusable rounded"
-            >
-              Change settlement route →
-            </Link>
-          </Panel>
-        ) : (
-          <SettleSteps
-            rfqId={rfqId}
-            trade={myFill.trade}
-            cashDecimals={cashDecimals}
-            settlementAddress={health?.settlementAddress ?? null}
-            cashBalance={balances?.cash?.[0]?.balance ?? null}
-            allowance={balances?.cash?.[0]?.allowance ?? null}
-            settled={detail.settledFillNonces.includes(myFill.trade.nonce)}
-            account={address}
-            isWallet={isWallet}
-            sellerSignature={detail.sellerSignatures[myFill.trade.nonce] ?? null}
-          />
-        )
+        <SettleSteps
+          rfqId={rfqId}
+          trade={myFill.trade}
+          cashDecimals={cashDecimals}
+          settlementAddress={health?.settlementAddress ?? null}
+          cashBalance={balances?.cash?.[0]?.balance ?? null}
+          allowance={balances?.cash?.[0]?.allowance ?? null}
+          settled={detail.settledFillNonces.includes(myFill.trade.nonce)}
+          account={address}
+          isWallet={isWallet}
+          sellerSignature={detail.sellerSignatures[myFill.trade.nonce] ?? null}
+        />
       )}
 
       <QuoteBoard

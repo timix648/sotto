@@ -176,7 +176,7 @@ export default function RulebookPage() {
                 hold in one EVM transaction. Atomicity comes from revert semantics. Anyone may
                 relay a fully-signed trade — that is deliberate.
               </Card>
-              <Card title="Path B — HIP-551 batch · script">
+              <Card title="Path B — HIP-551 atomic batch">
                 Each party signs only their own leg: a native HTS transfer for the cash, delivery
                 as the last inner transaction. No allowance anywhere. Atomicity is provided by
                 the network rather than by the contract.

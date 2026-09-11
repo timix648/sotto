@@ -57,19 +57,23 @@ export default function EnterPage() {
   const { data: health } = useHealth();
   const { isConnected: evmConnected } = useAccount();
   const native = useAppKitAccount({ namespace: nativeWalletNamespace });
-  const pathConnected = path === 'A' ? evmConnected : native.isConnected;
+  // Path B needs BOTH: the EVM session signs the EIP-712 Trade, the native
+  // session signs the buyer's own cash leg. One without the other cannot settle.
+  const pathConnected = path === 'A' ? evmConnected : evmConnected && native.isConnected;
   const walletActsAsDesk = path === 'A' && evmConnected;
   const switchTitle =
     path === 'A'
-      ? 'Path A is the live browser route and uses a USDC allowance. Click to preview the Hedera-native batch route and connect a HIP-820 wallet.'
-      : 'Path B connects a native Hedera wallet, but RFQ batch submission is still script-backed. Click to return to the live EVM route.';
+      ? 'Path A settles through a USDC allowance. Click for the Hedera-native batch route, where no allowance is granted at all.'
+      : 'Path B settles as a HIP-551 atomic batch and needs a HIP-820 wallet alongside the EVM one. Click to return to the allowance route.';
 
   const enter = (r: Role) => {
     setRole(r);
-    // A native account is not yet mapped into the EVM-addressed RFQ engine, so
-    // Path B keeps the desk explicitly in demo mode. The wallet connection is a
-    // capability preview, not a substitute identity.
-    setDemoMode(path === 'B' || !evmConnected);
+    // Demo mode is about whether a real wallet is driving, not about which
+    // settlement route is selected. Path B used to force it on, which left the
+    // dealer connected correctly and the settle button disabled anyway, because
+    // the portal gates signing on isWallet. Both paths sign the EIP-712 Trade
+    // with the EVM wallet; Path B adds a native signature on top.
+    setDemoMode(!evmConnected);
     router.push(`/${r}`);
   };
 
@@ -91,12 +95,12 @@ export default function EnterPage() {
         <div className="max-w-2xl">
           <p className="label">Settlement route</p>
           <h2 className="mt-1.5 text-lg font-semibold text-txt">
-            {path === 'A' ? 'Path A · EVM allowance' : 'Path B preview · Hedera atomic batch'}
+            {path === 'A' ? 'Path A · EVM allowance' : 'Path B · Hedera atomic batch'}
           </h2>
           <p className="mt-1.5 text-sm leading-relaxed text-muted">
             {path === 'A'
               ? 'Broad wallet compatibility. The buyer approves exact USDC and anyone can submit the signed atomic settlement.'
-              : 'Connect a supported HIP-820 wallet and inspect the native route. RFQ batch signing and relayer handoff are still run by the verified repository script, not this browser screen.'}
+              : 'No allowance anywhere. The buyer signs a native HTS transfer of their own cash, the venue signs delivery, and the network guarantees both legs or neither. Needs a HIP-820 wallet as well as the EVM one — HashPack gives you both.'}
           </p>
         </div>
 
