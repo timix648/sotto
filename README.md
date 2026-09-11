@@ -21,7 +21,7 @@ untouched.
 
 | | |
 |---|---|
-| **Live venue** | _deploying — see [Running it](#running-it) to run it locally in two commands_ |
+| **Live venue** | **https://sotto-tau.vercel.app** |
 | **Demo video** | _recording_ |
 | **Contracts** | five, all [verified on HashScan](#live-on-hedera-testnet) as `exact_match` |
 | **Audit trail** | [HCS topic `0.0.10383803`](https://hashscan.io/testnet/topic/0.0.10383803) — public, consensus-ordered |
