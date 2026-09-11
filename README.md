@@ -177,7 +177,7 @@ Cash is **real Circle USDC**. Nothing was minted for convenience.
 | Bond — `STO-BOND-A` | [`0xD53072649037FEecD305920087791a37dF8D517F`](https://hashscan.io/testnet/contract/0xD53072649037FEecD305920087791a37dF8D517F) |
 | Equity — `STO-EQ-A` | [`0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0`](https://hashscan.io/testnet/contract/0x21C3E7368a77756E896D58a6f97C3099Cc9C47e0) |
 | Short note — `STO-BOND-M` (matures in minutes, for the redemption demo) | [`0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14`](https://hashscan.io/testnet/contract/0x9c4e704b27dda83566d6f9ce0A2b1418b2249f14) |
-| `SottoSettlement` | [`0x73195C1f91899Bc1E822bb1D039033Eb38926931`](https://hashscan.io/testnet/contract/0x73195C1f91899Bc1E822bb1D039033Eb38926931) |
+| `SottoSettlement` | [`0x54788c43497727BCa093318f505d8428f2935bff`](https://hashscan.io/testnet/contract/0x54788c43497727BCa093318f505d8428f2935bff) |
 | `SottoNavOracle` | [`0xe8E7c39ba776C3B0778BE4571e72F5669f662c04`](https://hashscan.io/testnet/contract/0xe8E7c39ba776C3B0778BE4571e72F5669f662c04) |
 | `SottoDealerBond` | [`0xea7545EC3C5E74e0A44f8c289a657b6D849227E5`](https://hashscan.io/testnet/contract/0xea7545EC3C5E74e0A44f8c289a657b6D849227E5) |
 | `ChainlinkPriceSource` | [`0xFb321627eC70D7E86D82F80553dC2eC98BEb124a`](https://hashscan.io/testnet/contract/0xFb321627eC70D7E86D82F80553dC2eC98BEb124a) |
@@ -793,11 +793,12 @@ transaction — and it still burns the faucet's 2-hour window.
 ```
 
 ```
-contracts/        5 contracts, interfaces, mocks, 32 tests
+contracts/        5 contracts, interfaces, mocks, 33 tests
 backend/src/
   chain/          ethers adapter for holds, balances, KYC, settlement
   hcs/            HCS audit writer
-  rfq/            the RFQ state machine + allocator, 14 unit tests
+  rfq/            the RFQ state machine + allocator, 14 unit tests;
+                  the on-disk book snapshot, 7 more
   scripts/        deploy, seed, settle, batch, failure, oracle, bond,
                   redemption, partial-fill and price-source demos
   server.ts       the live API
