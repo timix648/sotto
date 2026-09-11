@@ -9,7 +9,8 @@ import { readFileSync } from 'node:fs';
 import { ethers } from 'ethers';
 import { HcsAudit } from './hcs/client.js';
 import { RfqEngine, RfqError } from './rfq/engine.js';
-import { Chain, PARTITION_DEFAULT, BOND_ABI as ISSUE_ABI } from './chain/index.js';
+import { Chain, PARTITION_DEFAULT, BOND_ABI as ISSUE_ABI, SETTLEMENT_ABI } from './chain/index.js';
+import { BatchRelay } from './chain/batch.js';
 import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
 import type { WsFrame, Rfq, Trade } from '../../packages/shared/src/types.js';
 
@@ -47,6 +48,22 @@ const hcs = new HcsAudit({
 });
 
 const engine = new RfqEngine((id, kind, payload) => hcs.write(id, kind, payload));
+
+/**
+ * Path B relay. The venue holds the batchKey and assembles; each party signs
+ * only its own leg. Absent when there is no operator account configured, in
+ * which case the Path B routes report that plainly rather than half-working.
+ */
+const batchRelay = env.ISSUER_ACCOUNT_ID && env.ISSUER_PRIVATE_KEY
+  ? new BatchRelay({
+      operatorId: env.ISSUER_ACCOUNT_ID,
+      operatorKey: env.ISSUER_PRIVATE_KEY,
+      cashTokenId: env.USDC_TOKEN_ID ?? '0.0.429274',
+      settlementAddress: env.SETTLEMENT_ADDRESS,
+      mirrorUrl: 'https://testnet.mirrornode.hedera.com/api/v1',
+    })
+  : null;
+const settlementIface = new ethers.Interface(SETTLEMENT_ABI);
 const sellerSignatures = new Map<string, Map<string, string>>();
 const settledFillNonces = new Map<string, Set<string>>();
 
@@ -251,6 +268,97 @@ app.post('/api/rfq/:id/seller-signature', async (req) => {
   byNonce.set(trade.nonce, b.signature);
   sellerSignatures.set(id, byNonce);
   return { ok: true, nonce: trade.nonce };
+});
+
+/**
+ * What a browser needs to build an inner cash leg this venue can batch: the
+ * batchKey to name, the token to move, and who is assembling.
+ */
+app.get('/api/batch/params', async () => {
+  if (!batchRelay) throw new RfqError('SETTLEMENT_REVERTED', 'Path B is not configured on this server');
+  const p = batchRelay.params();
+  return { ...p, available: true };
+});
+
+/** Hedera account id for an EVM address - an HTS transfer needs the account id. */
+app.get('/api/batch/account/:evm', async (req) => {
+  if (!batchRelay) throw new RfqError('SETTLEMENT_REVERTED', 'Path B is not configured on this server');
+  const { evm } = req.params as { evm: string };
+  return { evmAddress: evm, accountId: await batchRelay.accountIdFor(evm) };
+});
+
+/**
+ * Path B settlement. The buyer has already signed a native HTS transfer of
+ * their own cash; the venue verifies it says what the trade says, wraps it with
+ * the delivery call, and submits the pair atomically.
+ *
+ * No allowance is granted anywhere, and the venue never holds either asset.
+ */
+app.post('/api/rfq/:id/settle-batch', async (req) => {
+  if (!batchRelay) throw new RfqError('SETTLEMENT_REVERTED', 'Path B is not configured on this server');
+  const { id } = req.params as { id: string };
+  const b = (req.body ?? {}) as {
+    trade?: Trade; sellerSig?: string; buyerSig?: string; innerCashTxBase64?: string;
+  };
+  const rec = engine.get(id);
+  const trade = b.trade ?? rec.award?.trade;
+  if (!trade) throw new RfqError('HOLD_NOT_FOUND', 'no awarded trade to settle');
+  if (!b.sellerSig || !b.buyerSig) throw new RfqError('SIGNATURE_INVALID', 'both signatures are required');
+  if (!b.innerCashTxBase64) throw new RfqError('SIGNATURE_INVALID', 'the buyer-signed cash leg is required');
+
+  // Same guards as Path A: it must be an awarded fill, and it must not already
+  // have settled down either path. The nonce space is shared on-chain too.
+  const awarded = rec.fills.some((fill) => fill.trade.nonce === trade.nonce);
+  if (!awarded) throw new RfqError('SIGNATURE_INVALID', 'trade is not an awarded fill for this RFQ');
+  const completed = settledFillNonces.get(id) ?? new Set<string>();
+  if (completed.has(trade.nonce)) {
+    throw new RfqError('SETTLEMENT_REVERTED', 'this awarded fill is already settled');
+  }
+
+  try {
+    const result = await batchRelay.settle({
+      tradeTuple: [
+        trade.rfqId, trade.assetToken, trade.partition, trade.holdId, trade.cashToken,
+        trade.seller, trade.buyer, trade.quantity, trade.notional, trade.deadline, trade.nonce,
+      ],
+      sellerSig: b.sellerSig,
+      buyerSig: b.buyerSig,
+      innerCashTxBase64: b.innerCashTxBase64,
+      buyerEvm: trade.buyer,
+      sellerEvm: trade.seller,
+      notional: BigInt(trade.notional),
+      settlementIface,
+    });
+
+    completed.add(trade.nonce);
+    settledFillNonces.set(id, completed);
+    const allSettled = rec.fills.every((fill) => completed.has(fill.trade.nonce));
+    const rfq = allSettled ? await engine.markSettled(id, result.transactionId) : rec.rfq;
+    if (!allSettled) {
+      rec.audit.push(await hcs.write(id, 'SETTLED', {
+        txHash: result.transactionId, nonce: trade.nonce, dealer: trade.buyer,
+        quantity: trade.quantity, path: 'B', partial: true,
+      }));
+    }
+    broadcast({
+      type: 'settled', rfqId: id, txHash: result.transactionId, hashscanUrl: result.hashscanUrl,
+    }, id);
+    if (allSettled) pushRfq(rfq);
+
+    return {
+      ...result,
+      path: 'B',
+      status: allSettled ? 'SETTLED' : 'PARTIALLY_SETTLED',
+      batchStatus: result.status,
+      settledFillNonces: [...completed],
+    };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message.split('\n')[0] : String(e);
+    const rfq = await engine.markReverted(id, reason);
+    broadcast({ type: 'reverted', rfqId: id, reason }, id);
+    pushRfq(rfq);
+    return { status: 'FAILED', path: 'B', reason };
+  }
 });
 
 app.post('/api/rfq/:id/settle', async (req) => {
