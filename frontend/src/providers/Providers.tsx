@@ -4,13 +4,19 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createAppKit, useAppKitTheme } from '@reown/appkit/react';
 import { WagmiProvider } from 'wagmi';
-import { appKitNetworks, appKitProjectId, wagmiAdapter } from '@/lib/appkit';
+import {
+  appKitNetworks,
+  appKitProjectId,
+  hederaNativeAdapter,
+  wagmiAdapter,
+} from '@/lib/appkit';
 import { APP_URL } from '@/lib/config';
 import { RoleProvider } from '@/hooks/useRole';
+import { SettlementPathProvider } from '@/hooks/useSettlementPath';
 import { ThemeProvider, useTheme } from '@/hooks/useTheme';
 
 createAppKit({
-  adapters: [wagmiAdapter],
+  adapters: [wagmiAdapter, hederaNativeAdapter],
   networks: appKitNetworks,
   defaultNetwork: appKitNetworks[0],
   projectId: appKitProjectId,
@@ -74,8 +80,10 @@ export function Providers({ children }: { children: ReactNode }) {
     <ThemeProvider>
       <WagmiProvider config={wagmiAdapter.wagmiConfig}>
         <QueryClientProvider client={queryClient}>
-          <AppKitThemeSync />
-          <RoleProvider>{children}</RoleProvider>
+          <SettlementPathProvider>
+            <AppKitThemeSync />
+            <RoleProvider>{children}</RoleProvider>
+          </SettlementPathProvider>
         </QueryClientProvider>
       </WagmiProvider>
     </ThemeProvider>

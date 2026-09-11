@@ -19,11 +19,16 @@ untouched.
 
 **ETHOnline 2026 · Hedera · Tokenization of Anything**
 
+> **Judging or running the demo?** Start with the
+> [three-minute walkthrough and operator guide](docs/DEMO-GUIDE.md). It separates what is
+> browser-live, what is a deliberately labelled demo, and what is proven on-chain by scripts.
+
 ---
 
 ## Contents
 
 - [Live on Hedera testnet](#live-on-hedera-testnet)
+- [Judge walkthrough](#judge-walkthrough)
 - [Verify it yourself](#verify-it-yourself)
 - [How settlement works](#how-settlement-works)
 - [Two settlement paths](#two-settlement-paths)
@@ -36,6 +41,32 @@ untouched.
 - [Architecture](#architecture)
 - [Running it](#running-it)
 - [Roadmap: CLPR](#roadmap-clpr)
+
+---
+
+## Judge walkthrough
+
+The Hedera prize asks for a real asset, compliance and lifecycle management—not merely a token
+with a name. Sotto maps directly onto that rubric:
+
+| Prize signal | Sotto proof |
+|---|---|
+| ATS-issued real asset | Bond, equity and short-dated note from factory `0.0.7708432` |
+| Secondary market ATS does not provide | Sealed RFQ, price-time allocation, partial fills and firm quotes |
+| Compliance in use | KYC is enforced inside ATS at delivery; revocation reverts both legs |
+| Lifecycle operation | Issuance, trading, scheduled execution and redemption at maturity |
+| Oracle/NAV integration | On-chain band guard with administrator NAV or live Chainlink source |
+| Hedera-native services | HCS ordering, HTS cash, HIP-551 batch and HIP-1215 scheduled calls |
+| Verifiability | HashScan transactions, public HCS sequence numbers and exact-match source |
+
+For a no-key review, open the landing page, Rulebook, a labelled demo desk, Audit trail, and one
+of the transactions below. For an owner-operated transaction, follow
+[`docs/DEMO-GUIDE.md`](docs/DEMO-GUIDE.md).
+
+**Wallet routes are explicit.** Path A is the complete EVM browser flow. Path B uses the official
+Hedera WalletConnect adapter for a native `hedera:testnet` connection preview, while the complete
+HIP-551 settlement remains chain-proven through `backend/src/scripts/settle-batch.ts`. The UI says
+so plainly; a wallet connection is never presented as a transaction signature.
 
 ---
 
@@ -203,6 +234,11 @@ BatchTransaction (batchKey = venue relayer)
 Each party signs only its own leg. **No allowance anywhere.** The cash leg is a native HTS
 transfer, not an ERC-20 facade call, and atomicity is provided by the network rather than by
 the contract. EVM chains structurally cannot do this.
+
+The browser currently completes Path A. Its `/enter` route can also establish a Hedera-native
+HIP-820 wallet session for Path B, but browser RFQ batch signing and relayer handoff are not yet
+wired. The complete Path B transaction is executed by `settle-batch.ts`; see the
+[demo guide](docs/DEMO-GUIDE.md#path-b--native-connection-preview-and-script-backed-settlement).
 
 The network permits **at most one contract call per batch and it must be last**, which is why
 Path A moves cash before delivery too — both paths then reason identically and tests transfer
@@ -473,6 +509,9 @@ permissioned one.** That is a real cost of Path B.
 
 **Other limits, plainly:**
 
+- Path B native-wallet discovery is present in the web app, but complete browser batch signing
+  is not. The deployed contract still needs both EIP-712 Trade signatures in addition to the
+  buyer-signed native cash leg, and the backend must validate that leg before relayer assembly.
 - The integrated web app uses seller- and dealer-wallet signatures for holds, USDC approvals
   and EIP-712 Trades. The backend still holds the issuer key for local KYC and issuance admin
   routes; do not expose those routes publicly without authentication or moving them to an
@@ -631,7 +670,7 @@ backend/src/
   server.ts       the live API
 packages/shared/  the wire contract: types, EIP-712 domain, commit formula
 frontend/         Next.js seller, dealer, issuer, audit and settlement application
-docs/             BLUEPRINT.md · MECHANICS.md · ATS-SPIKE.md
+docs/             DEMO-GUIDE.md · BLUEPRINT.md · MECHANICS.md · ATS-SPIKE.md
 ```
 
 `packages/shared` is imported by both the backend and the frontend. The commit formula and the
@@ -641,6 +680,9 @@ disagree about what was signed.
 ---
 
 ## Running it
+
+For wallet-by-wallet demo steps, funding order, Path A/Path B boundaries and troubleshooting,
+use [`docs/DEMO-GUIDE.md`](docs/DEMO-GUIDE.md).
 
 ```powershell
 npm install

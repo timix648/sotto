@@ -25,6 +25,7 @@ import { Shell } from '@/components/layout/Shell';
 import { QuoteBoard } from '@/components/QuoteBoard';
 import { useHealth, useAssets, useRfqs, useRfq, useBalances, useNow, useRfqSubscription, qk } from '@/hooks/useApi';
 import { useRole } from '@/hooks/useRole';
+import { useSettlementPath } from '@/hooks/useSettlementPath';
 import { useCommitStore, type SealedQuote } from '@/hooks/useCommitStore';
 import { api, errorCopy } from '@/lib/api';
 import { useSignTrade } from '@/lib/sign';
@@ -136,6 +137,7 @@ function RequestRow({
 
 function DealerWorkspace({ rfqId, cashDecimals }: { rfqId: string; cashDecimals: number }) {
   const { address, isWallet } = useRole();
+  const { path } = useSettlementPath();
   const { data: detail } = useRfq(rfqId);
   const { data: health } = useHealth();
   const { data: assets } = useAssets();
@@ -209,18 +211,39 @@ function DealerWorkspace({ rfqId, cashDecimals }: { rfqId: string; cashDecimals:
       )}
 
       {won && myFill && (
-        <SettleSteps
-          rfqId={rfqId}
-          trade={myFill.trade}
-          cashDecimals={cashDecimals}
-          settlementAddress={health?.settlementAddress ?? null}
-          cashBalance={balances?.cash?.[0]?.balance ?? null}
-          allowance={balances?.cash?.[0]?.allowance ?? null}
-          settled={detail.settledFillNonces.includes(myFill.trade.nonce)}
-          account={address}
-          isWallet={isWallet}
-          sellerSignature={detail.sellerSignatures[myFill.trade.nonce] ?? null}
-        />
+        path === 'B' ? (
+          <Panel
+            title="Path B browser handoff is not live yet"
+            subtitle="The native wallet connection is ready; RFQ batch assembly remains script-backed."
+          >
+            <Callout tone="held" title="No signing prompt is expected on this screen yet">
+              The deployed delivery contract still requires EIP-712 signatures from both trade
+              parties, while the native wallet signs the HTS cash transaction. Those signatures
+              and the relayer-built HIP-551 batch are proven by the repository demo, but the
+              browser-to-relayer handoff has not been implemented. Switch to Path A on the entry
+              page to settle this award from the browser.
+            </Callout>
+            <Link
+              href="/enter"
+              className="mt-4 inline-block text-xs font-medium text-wine underline underline-offset-2 focusable rounded"
+            >
+              Change settlement route →
+            </Link>
+          </Panel>
+        ) : (
+          <SettleSteps
+            rfqId={rfqId}
+            trade={myFill.trade}
+            cashDecimals={cashDecimals}
+            settlementAddress={health?.settlementAddress ?? null}
+            cashBalance={balances?.cash?.[0]?.balance ?? null}
+            allowance={balances?.cash?.[0]?.allowance ?? null}
+            settled={detail.settledFillNonces.includes(myFill.trade.nonce)}
+            account={address}
+            isWallet={isWallet}
+            sellerSignature={detail.sellerSignatures[myFill.trade.nonce] ?? null}
+          />
+        )
       )}
 
       <QuoteBoard

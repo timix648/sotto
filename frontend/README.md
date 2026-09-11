@@ -49,7 +49,7 @@ Multi-dealer allocations remain `AWARDED` until every fill has settled. Each fil
 
 - Contract addresses and demo account addresses come from `/api/health`; none are hardcoded in runtime components.
 - Protocol types, commit hashing, RFQ IDs, and EIP-712 definitions come from `packages/shared`. There is no frontend-local copy.
-- The live browser flow uses permissionless Path A. The proven HIP-551 Path B remains available through the backend scripts; the API does not pretend to offer a browser Path B flow it cannot assemble.
+- The live browser flow uses permissionless Path A. Path B can establish a Hedera-native wallet session as a clearly labelled connection preview, while the proven HIP-551 settlement remains available through the backend script; the UI does not pretend that preview signs or submits the batch.
 - Issuer KYC and unit issuance controls call the trusted local admin API, which holds the issuer key. Do not expose those endpoints publicly without authentication or replacing them with issuer-wallet transactions.
 - RFQ records and submitted seller signatures are in memory, matching the current backend design. Restarting the API clears active RFQs.
 - `.env.local` is ignored by Git. Set a Reown project ID there: AppKit lists installed EIP-6963 desktop wallets first and keeps WalletConnect QR/mobile as a fallback.

@@ -11,14 +11,17 @@
 // a wallet upgrades signing to a real EIP-712 signature. It is never a gate — a
 // judge should be able to walk the whole venue without one.
 import { useRouter } from 'next/navigation';
+import { useAppKitAccount } from '@reown/appkit/react';
 import { useAccount } from 'wagmi';
 import { Shell } from '@/components/layout/Shell';
 import { Addr } from '@/components/ui/Addr';
 import { WalletButton } from '@/components/layout/WalletButton';
 import { useRole, ROLES, type Role } from '@/hooks/useRole';
+import { useSettlementPath } from '@/hooks/useSettlementPath';
 import { useHealth } from '@/hooks/useApi';
 import { hashscan } from '@/lib/hashscan';
 import { cn } from '@/lib/cn';
+import { nativeWalletNamespace } from '@/lib/appkit';
 
 const DETAIL: Record<Role, { does: string; here: string[] }> = {
   issuer: {
@@ -50,12 +53,23 @@ const DETAIL: Record<Role, { does: string; here: string[] }> = {
 export default function EnterPage() {
   const router = useRouter();
   const { role, setRole, matchedRole, demoMode, setDemoMode } = useRole();
+  const { path, togglePath } = useSettlementPath();
   const { data: health } = useHealth();
-  const { isConnected } = useAccount();
+  const { isConnected: evmConnected } = useAccount();
+  const native = useAppKitAccount({ namespace: nativeWalletNamespace });
+  const pathConnected = path === 'A' ? evmConnected : native.isConnected;
+  const walletActsAsDesk = path === 'A' && evmConnected;
+  const switchTitle =
+    path === 'A'
+      ? 'Path A is the live browser route and uses a USDC allowance. Click to preview the Hedera-native batch route and connect a HIP-820 wallet.'
+      : 'Path B connects a native Hedera wallet, but RFQ batch submission is still script-backed. Click to return to the live EVM route.';
 
   const enter = (r: Role) => {
     setRole(r);
-    setDemoMode(!isConnected);
+    // A native account is not yet mapped into the EVM-addressed RFQ engine, so
+    // Path B keeps the desk explicitly in demo mode. The wallet connection is a
+    // capability preview, not a substitute identity.
+    setDemoMode(path === 'B' || !evmConnected);
     router.push(`/${r}`);
   };
 
@@ -72,6 +86,40 @@ export default function EnterPage() {
           change desk at any time from the header.
         </p>
       </div>
+
+      <section className="mt-7 flex flex-col gap-4 rounded-xl border-2 border-line bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="max-w-2xl">
+          <p className="label">Settlement route</p>
+          <h2 className="mt-1.5 text-lg font-semibold text-txt">
+            {path === 'A' ? 'Path A · EVM allowance' : 'Path B preview · Hedera atomic batch'}
+          </h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted">
+            {path === 'A'
+              ? 'Broad wallet compatibility. The buyer approves exact USDC and anyone can submit the signed atomic settlement.'
+              : 'Connect a supported HIP-820 wallet and inspect the native route. RFQ batch signing and relayer handoff are still run by the verified repository script, not this browser screen.'}
+          </p>
+        </div>
+
+        <div className="group relative shrink-0 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={togglePath}
+            title={switchTitle}
+            aria-describedby="settlement-path-tip"
+            className="rounded-lg border-2 border-wine bg-wineWash px-4 py-2.5 text-left text-sm font-semibold text-wine transition-[transform,background-color,color] duration-200 hover:-translate-y-0.5 hover:bg-wine hover:text-white focusable"
+          >
+            Switch to Path {path === 'A' ? 'B' : 'A'}
+            <span className="ml-2" aria-hidden>↔</span>
+          </button>
+          <span
+            id="settlement-path-tip"
+            role="tooltip"
+            className="pointer-events-none absolute right-0 top-full z-20 mt-2 hidden w-72 rounded-lg border border-line bg-panel p-3 text-xs font-normal leading-relaxed text-muted shadow-panel group-hover:block group-focus-within:block"
+          >
+            {switchTitle}
+          </span>
+        </div>
+      </section>
 
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {ROLES.map((r) => {
@@ -122,9 +170,9 @@ export default function EnterPage() {
                       {demoAddress.slice(0, 6)}…{demoAddress.slice(-4)}
                     </span>
                   </span>
-                ) : <span className="text-xs text-dim">{isConnected ? 'wallet desk' : 'demo available'}</span>}
+                ) : <span className="text-xs text-dim">{walletActsAsDesk ? 'wallet desk' : pathConnected ? 'native wallet ready' : 'demo available'}</span>}
                 <span className="text-xs font-medium text-txt transition-transform group-hover:translate-x-0.5">
-                  {isConnected ? 'Enter →' : 'Open demo →'}
+                  {walletActsAsDesk ? 'Enter →' : 'Open demo →'}
                 </span>
               </div>
             </button>
@@ -136,11 +184,15 @@ export default function EnterPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-xl">
             <h2 className="text-base font-semibold text-txt">
-              {isConnected ? 'Wallet connected' : demoMode ? 'Demo mode is active' : 'Connect or preview'}
+              {pathConnected
+                ? path === 'A' ? 'EVM wallet connected' : 'Hedera wallet connected'
+                : demoMode ? 'Demo mode is active' : 'Connect or preview'}
             </h2>
             <p className="mt-1.5 text-sm leading-relaxed text-muted">
-              {isConnected
-                ? 'Trading actions are signed by your wallet. The venue never substitutes a demo account while you are connected.'
+              {pathConnected
+                ? path === 'A'
+                  ? 'Path A contract actions and trade approvals are signed by your EVM wallet.'
+                  : 'The native Hedera session is connected. This confirms wallet compatibility; it does not yet sign or submit an RFQ batch from the browser.'
                 : demoMode
                   ? 'You explicitly opened a funded testnet demo desk. Demo balances are labelled and trading signatures still require a wallet.'
                   : 'Public browsing shows no account or balance. Choose a desk above to open its labelled testnet demo, or connect a wallet to act as yourself.'}

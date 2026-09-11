@@ -83,7 +83,7 @@ export function Header() {
             )}
           </span>
 
-          <BalanceChip />
+          {!atHome && <BalanceChip />}
 
           {/* Which desk you are at. Pressing it returns you to the entry page —
               it reports a state, it does not switch identity in place. */}
@@ -111,7 +111,7 @@ export function Header() {
           )}
 
           <ThemeToggle />
-          <WalletButton />
+          {!atHome && !atEntry && <WalletButton />}
         </div>
       </div>
 
