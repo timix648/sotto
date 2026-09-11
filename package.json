@@ -15,7 +15,8 @@
     "test:engine": "tsx --test backend/src/rfq/engine.test.ts",
     "test:frontend": "npm run test --workspace @sotto/frontend",
     "typecheck:frontend": "npm run typecheck --workspace @sotto/frontend",
-    "test:batch": "tsx --test backend/src/chain/batch.test.ts"
+    "test:batch": "tsx --test backend/src/chain/batch.test.ts",
+    "test:store": "tsx --test backend/src/rfq/store.test.ts"
   },
   "dependencies": {
     "@fastify/websocket": "^11.3.0",

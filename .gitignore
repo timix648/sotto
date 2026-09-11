@@ -25,3 +25,6 @@ typechain-types/
 # own infrastructure. Not useful to a reader and not ours to publish.
 deploy/
 *.local.yml
+
+# The RFQ book snapshot. Runtime state, not source.
+data/

@@ -76,6 +76,23 @@ export class RfqEngine {
 
   constructor(private readonly audit: AuditWriter) {}
 
+  /**
+   * The whole book, for snapshotting. See rfq/store.ts for why this exists:
+   * the ATS hold outlives the process, so the request that explains it has to
+   * as well.
+   */
+  dump(): RfqRecord[] {
+    return [...this.records.values()];
+  }
+
+  /** Replace the book with a snapshot. Called once, at boot, before serving. */
+  hydrate(records: RfqRecord[]): void {
+    this.records.clear();
+    for (const rec of records) {
+      if (rec?.rfq?.id) this.records.set(rec.rfq.id, rec);
+    }
+  }
+
   list(status?: RfqStatus): Rfq[] {
     const all = [...this.records.values()].map(r => r.rfq);
     return status ? all.filter(r => r.status === status) : all;

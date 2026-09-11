@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { ethers } from 'ethers';
 import { HcsAudit } from './hcs/client.js';
 import { RfqEngine, RfqError } from './rfq/engine.js';
+import { RfqStore } from './rfq/store.js';
 import { Chain, PARTITION_DEFAULT, BOND_ABI as ISSUE_ABI, SETTLEMENT_ABI } from './chain/index.js';
 import { BatchRelay } from './chain/batch.js';
 import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
@@ -56,6 +57,14 @@ const hcs = new HcsAudit({
 
 const engine = new RfqEngine((id, kind, payload) => hcs.write(id, kind, payload));
 
+// The book survives a restart. Without this a redeploy or a reboot erases every
+// live request while its ATS hold keeps running on-chain, stranding the seller's
+// size with no request left to release it against.
+const store = new RfqStore(process.env.RFQ_STORE ?? './data/rfq-book.json');
+const restored = store.load();
+engine.hydrate(restored);
+if (restored.length) console.log(`  restored ${restored.length} request(s) from ${store.path}`);
+
 /**
  * Path B relay. The venue holds the batchKey and assembles; each party signs
  * only its own leg. Absent when there is no operator account configured, in
@@ -93,6 +102,13 @@ app.addHook('onSend', async (_req, reply) => {
   reply.header('access-control-allow-methods', 'GET,POST,OPTIONS');
 });
 app.options('/*', async (_req, reply) => reply.send());
+
+// Snapshot after anything that could have changed the book. One hook rather
+// than a call in each handler, so a route added later cannot forget to persist.
+// Reads are untouched; only POSTs mutate.
+app.addHook('onResponse', async (req) => {
+  if (req.method === 'POST') store.save(engine.dump());
+});
 
 // Map engine errors onto section 3.6's envelope.
 app.setErrorHandler((err, _req, reply) => {
