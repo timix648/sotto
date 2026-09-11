@@ -176,16 +176,29 @@ app.get('/api/rfq/:id/audit', async (req) => {
   return { topicId: hcs.topicId, topicUrl: hcs.hashscanUrl, events: r.audit };
 });
 
-app.post('/api/rfq', async (req) => {
+app.post('/api/rfq', async (req, reply) => {
   const b = (req.body ?? {}) as Record<string, string | number>;
+
+  // `seller` and `quantity` used to fall back to the operator address and 20
+  // units, which made an empty POST create a real request on the public venue -
+  // an accidental curl during deployment did exactly that. Windows and partition
+  // keep their defaults because they are venue policy; who is selling and how
+  // much are not something to guess.
+  if (typeof b.seller !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(b.seller)) {
+    return reply.code(400).send({ error: 'seller must be a 0x-prefixed address' });
+  }
+  if (!/^[1-9][0-9]*$/.test(String(b.quantity ?? ''))) {
+    return reply.code(400).send({ error: 'quantity must be a positive integer' });
+  }
+
   const asset = await chain.asset();
   const rfq = await engine.open({
     assetToken: env.BOND_ADDRESS,
     assetSymbol: asset.symbol,
     partition: String(b.partition ?? PARTITION_DEFAULT),
     cashToken: CASH,
-    quantity: String(b.quantity ?? '20'),
-    seller: String(b.seller ?? env.SELLER_ADDRESS),
+    quantity: String(b.quantity),
+    seller: b.seller,
     commitWindowSecs: Number(b.commitWindowSecs ?? 120),
     revealWindowSecs: Number(b.revealWindowSecs ?? 120),
   });
