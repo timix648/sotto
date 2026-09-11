@@ -32,6 +32,11 @@ export const SETTLEMENT_ABI = [
   'function settle((bytes32 rfqId,address assetToken,bytes32 partition,uint256 holdId,address cashToken,address seller,address buyer,uint256 quantity,uint256 notional,uint256 deadline,uint256 nonce),bytes,bytes) returns (bool)',
   'function deliver((bytes32 rfqId,address assetToken,bytes32 partition,uint256 holdId,address cashToken,address seller,address buyer,uint256 quantity,uint256 notional,uint256 deadline,uint256 nonce),bytes,bytes) returns (bool)',
   'function nonces(address) view returns (uint256)',
+  // The band the guard actually enforces. Read from the contract rather than
+  // mirrored as a constant, so what the UI shows a dealer cannot drift from
+  // what settle() will reject them for.
+  'function bandBps() view returns (uint16)',
+  'function navOracle() view returns (address)',
   'event Settled(bytes32 indexed rfqId,address indexed seller,address indexed buyer,uint256 quantity,uint256 notional,address assetToken,address cashToken)',
 ];
 
@@ -270,6 +275,24 @@ export class Chain {
    * control. The portal shows the age so the refusal is legible BEFORE anyone
    * signs anything.
    */
+  /**
+   * The band the deployed settlement will enforce, in basis points.
+   *
+   * A fresh settlement starts with navOracle unset, and settle() skips the band
+   * entirely in that case - so "there is a band" and "the band is on" are two
+   * different questions and both belong on screen. Null means no oracle is
+   * wired and no price will be refused for being off-market.
+   */
+  async navBandBps(): Promise<number | null> {
+    try {
+      const oracle = (await this.settlement.navOracle?.()) as string | undefined;
+      if (oracle && oracle === ethers.ZeroAddress) return null;
+      return Number(await this.settlement.bandBps());
+    } catch {
+      return null;
+    }
+  }
+
   async navState(assetToken: string): Promise<NavState | null> {
     if (!this.navOracle) return null;
     const oracle = this.navOracle;

@@ -200,6 +200,15 @@ export interface Asset {
   hashscanUrl?: string | null;
   /** NAV band, when the oracle has a mark for this asset. */
   nav?: string | null;
+  navDecimals?: number | null;
+  navUpdatedAt?: number | null;
+  navFresh?: boolean | null;
+  /**
+   * The band settle() enforces around `nav`, in basis points. Null when no
+   * oracle is wired to the deployed settlement, in which case no price is
+   * off-market as far as the contract is concerned.
+   */
+  navBandBps?: number | null;
   totalSupply?: string | null;
 }
 

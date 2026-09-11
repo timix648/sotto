@@ -148,7 +148,25 @@ app.get('/api/health', async () => ({
 
 app.get('/api/assets', async () => {
   const a = await chain.asset();
-  return [{ ...a, partition: PARTITION_DEFAULT, cashToken: CASH }];
+  // NAV belongs on the asset, not only behind /api/nav/:token.
+  //
+  // Every screen that shows a price has a "vs NAV" next to it and an Asset in
+  // hand, and the band guard in settle() rejects a trade priced more than
+  // bandBps from this number. Leaving it off the asset meant the column read
+  // "-" everywhere, so a dealer quoted blind and found out at settlement, by
+  // way of a revert with no reason string. A reference a contract enforces has
+  // to be one the screen can show.
+  const nav = await chain.navState(a.assetToken).catch(() => null);
+  return [{
+    ...a,
+    partition: PARTITION_DEFAULT,
+    cashToken: CASH,
+    nav: nav?.price ?? null,
+    navDecimals: nav?.decimals ?? null,
+    navUpdatedAt: nav?.updatedAt ?? null,
+    navFresh: nav?.fresh ?? null,
+    navBandBps: await chain.navBandBps().catch(() => null),
+  }];
 });
 
 app.get('/api/balances/:account', async (req) => {

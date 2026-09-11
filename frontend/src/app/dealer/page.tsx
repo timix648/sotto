@@ -163,7 +163,11 @@ function DealerWorkspace({ rfqId, cashDecimals }: { rfqId: string; cashDecimals:
     (f) => address && f.dealer.toLowerCase() === address.toLowerCase()
   );
   const won = Boolean(myFill);
-  const nav = assets?.find((a) => a.token === rfq?.assetToken)?.nav ?? null;
+  const asset_ = assets?.find((a) => a.token === rfq?.assetToken);
+  const nav = asset_?.nav ?? null;
+  // The band settle() will actually enforce. Null when no oracle is wired,
+  // in which case no price is off-market as far as the contract is concerned.
+  const bandBps = asset_?.navBandBps ?? null;
 
   if (!rfq) {
     return (
@@ -189,6 +193,7 @@ function DealerWorkspace({ rfqId, cashDecimals }: { rfqId: string; cashDecimals:
           dealer={address}
           cashDecimals={cashDecimals}
           nav={nav}
+          bandBps={bandBps}
           store={store}
         />
       )}
@@ -251,12 +256,13 @@ function DealerWorkspace({ rfqId, cashDecimals }: { rfqId: string; cashDecimals:
 // ----------------------------------------------------------------- committing
 
 function CommitForm({
-  rfq, dealer, cashDecimals, nav, store,
+  rfq, dealer, cashDecimals, nav, bandBps, store,
 }: {
   rfq: Rfq;
   dealer: string | null;
   cashDecimals: number;
   nav: string | null;
+  bandBps: number | null;
   store: ReturnType<typeof useCommitStore>;
 }) {
   const qc = useQueryClient();
@@ -307,6 +313,29 @@ function CommitForm({
       return null;
     }
   }, [parsed, parsedQuantity, dealer]);
+
+  /**
+   * Whether settle() would refuse this price.
+   *
+   * SottoSettlement checks every fill against the NAV oracle and reverts when
+   * the price is more than bandBps away from it - with a custom error, so the
+   * transaction comes back status 0 at ~60,000 gas and no reason string. A
+   * dealer who quoted 1.20 against a NAV of 98.35 found that out only after
+   * committing, revealing, winning and approving cash. The band is knowable
+   * now, so it is said now. The quote is still allowed: the venue does not
+   * decide what a price should be, it only says which ones it will settle.
+   */
+  const outsideBand = useMemo(() => {
+    if (!parsed || !nav || bandBps == null) return null;
+    const navUnits = BigInt(nav);
+    if (navUnits === 0n) return null;
+    const price = BigInt(parsed);
+    const spread = price > navUnits ? price - navUnits : navUnits - price;
+    if (spread * 10_000n <= navUnits * BigInt(bandBps)) return null;
+    const lo = (navUnits * (10_000n - BigInt(bandBps))) / 10_000n;
+    const hi = (navUnits * (10_000n + BigInt(bandBps))) / 10_000n;
+    return { lo: lo.toString(), hi: hi.toString() };
+  }, [parsed, nav, bandBps]);
 
   async function submit() {
     if (!parsed || !parsedQuantity || !parsedMinQuantity || !dealer) return;
@@ -396,6 +425,20 @@ function CommitForm({
           </span>
           . A fresh random nonce is generated when you submit, so the hash below is not the one that
           will be sent — it is here to show that the price alone does not determine it.
+        </div>
+      )}
+
+      {outsideBand && (
+        <div className="mt-3">
+          <Callout tone="neg" title="The venue will not settle at this price">
+            It sits outside the {(bandBps ?? 0) / 100}% band around the NAV mark of{' '}
+            <span className="num">{formatPrice(nav ?? '0', cashDecimals)}</span>. Settlement
+            accepts{' '}
+            <span className="num">{formatPrice(outsideBand.lo, cashDecimals)}</span> to{' '}
+            <span className="num">{formatPrice(outsideBand.hi, cashDecimals)}</span>. You can
+            still commit — the band is checked on-chain at settlement, not here — but a winning
+            quote outside it reverts and the block goes unfilled.
+          </Callout>
         </div>
       )}
 
