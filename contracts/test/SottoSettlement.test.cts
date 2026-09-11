@@ -368,11 +368,34 @@ describe('SottoSettlement - partial fills', () => {
     });
     expect(held).to.equal(400n);
 
-    await settlement.releaseHold(await bond.getAddress(), PARTITION, seller.address, HOLD_ID, 400n);
+    await settlement
+      .connect(seller)
+      .releaseHold(await bond.getAddress(), PARTITION, seller.address, HOLD_ID, 400n);
     const [afterRelease] = await bond.getHoldForByPartition({
       partition: PARTITION, tokenHolder: seller.address, holdId: HOLD_ID,
     });
     expect(afterRelease).to.equal(0n);
     expect(await bond.balanceOf(seller.address)).to.equal(400n);
+  });
+
+  it('lets nobody but the holder release a live escrow', async () => {
+    const { seller, b1, bond, settlement } = await loadFixture(multiFixture);
+
+    // This contract is the escrow on every hold it settles, so an unguarded
+    // release would have let any address cancel any live RFQ: the seller keeps
+    // their tokens, the winning dealer loses the fill. b1 is a rival dealer
+    // here, which is exactly who would want to.
+    await expect(
+      settlement
+        .connect(b1)
+        .releaseHold(await bond.getAddress(), PARTITION, seller.address, HOLD_ID, 1000n)
+    )
+      .to.be.revertedWithCustomError(settlement, 'NotHolder')
+      .withArgs(seller.address, b1.address);
+
+    const [stillHeld] = await bond.getHoldForByPartition({
+      partition: PARTITION, tokenHolder: seller.address, holdId: HOLD_ID,
+    });
+    expect(stillHeld).to.equal(1000n);
   });
 });

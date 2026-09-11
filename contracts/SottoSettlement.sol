@@ -88,6 +88,7 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
     error HoldExpired(uint256 expiration, uint256 nowTs);
     error DeliveryFailed();
     error ReleaseFailed();
+    error NotHolder(address holder, address caller);
     error ZeroQuantity();
     error NoNavReference(address asset);
 
@@ -194,6 +195,15 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
      *      needed, and that is a real property worth stating: if Sotto disappears
      *      entirely, a seller's tokens are still recoverable. The venue cannot
      *      trap collateral.
+     * @dev Only the holder may call this. The rest of the contract takes no
+     *      interest in msg.sender - settle() is authorised by both parties'
+     *      signatures precisely so that anyone can relay it - and this function
+     *      was written in that spirit. It should not have been. This contract is
+     *      the escrow on every hold it settles, so an unguarded release let any
+     *      address cancel any live escrow: the seller kept their tokens, but the
+     *      trade died and the winning dealer lost the fill. Relaying a trade two
+     *      parties already signed is permissionless; cancelling one party's
+     *      escrow is not the same act and does not get the same rule.
      */
     function releaseHold(
         address assetToken,
@@ -202,6 +212,7 @@ contract SottoSettlement is EIP712, AccessControl, ReentrancyGuard {
         uint256 holdId,
         uint256 amount
     ) external {
+        if (msg.sender != holder) revert NotHolder(holder, msg.sender);
         bool ok = IHoldByPartition(assetToken).releaseHoldByPartition(
             IHoldByPartition.HoldIdentifier({ partition: partition, tokenHolder: holder, holdId: holdId }),
             amount
