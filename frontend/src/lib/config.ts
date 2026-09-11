@@ -23,8 +23,20 @@ export const WS_URL =
 export const WALLETCONNECT_PROJECT_ID =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
 
+/**
+ * The origin this app is served from, shown to the user in their wallet's
+ * connection prompt.
+ *
+ * Derived from the browser rather than configured, because a deployment always
+ * knows its own origin and an env var can be — and was — wrong. Ours briefly
+ * pointed at an unrelated project that happened to own the name we guessed,
+ * which would have shown a stranger's domain in the approval dialog. The env
+ * var still wins when set, for a deployment that is fronted by a different
+ * hostname than it is served from.
+ */
 export const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  process.env.NEXT_PUBLIC_APP_URL
+  || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
 /** Port 4010 is the fixture mock; 4000 is the live testnet API. */
 export const LOOKS_LIKE_MOCK_PORT = /:4010(\/|$)/.test(API_BASE);
