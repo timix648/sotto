@@ -15,7 +15,7 @@
 // deep-link route instead of the direct button.
 import { useMemo } from 'react';
 import { useAppKitAccount, useAppKitProvider } from '@reown/appkit/react';
-import { nativeWalletNamespace } from '@/lib/appkit';
+import { HEDERA_NAMESPACE } from '@/lib/namespace';
 import type { NativeSigner } from '@/lib/batch';
 
 export interface NativeSession {
@@ -27,8 +27,8 @@ export interface NativeSession {
 }
 
 export function useNativeSigner(): NativeSession {
-  const account = useAppKitAccount({ namespace: nativeWalletNamespace });
-  const { walletProvider } = useAppKitProvider<NativeSigner | undefined>(nativeWalletNamespace);
+  const account = useAppKitAccount({ namespace: HEDERA_NAMESPACE });
+  const { walletProvider } = useAppKitProvider<NativeSigner | undefined>(HEDERA_NAMESPACE);
 
   return useMemo(() => {
     // HIP-30 ids arrive as `hedera:testnet:0.0.x`; the SDK wants the tail.
