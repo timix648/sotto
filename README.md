@@ -30,6 +30,10 @@ untouched.
 > **Judging or running the demo?** Start with the
 > [three-minute walkthrough and operator guide](docs/DEMO-GUIDE.md). It separates what is
 > browser-live, what is a deliberately labelled demo, and what is proven on-chain by scripts.
+>
+> **Testing it yourself?** [`docs/TESTING.md`](docs/TESTING.md) walks through both
+> settlement paths click by click, and separates the Hedera wallet setup — which is not
+> our code — from the product.
 
 ---
 
