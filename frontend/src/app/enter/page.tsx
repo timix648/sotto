@@ -60,7 +60,11 @@ export default function EnterPage() {
   // Path B needs BOTH: the EVM session signs the EIP-712 Trade, the native
   // session signs the buyer's own cash leg. One without the other cannot settle.
   const pathConnected = path === 'A' ? evmConnected : evmConnected && native.isConnected;
-  const walletActsAsDesk = path === 'A' && evmConnected;
+  // Not path-dependent. Both paths sign the EIP-712 Trade with the EVM wallet,
+  // and demo mode turns on the moment there is no wallet driving. Gating this
+  // on Path A left every desk card saying "Open demo" on Path B while a real
+  // wallet was connected and about to sign a real settlement.
+  const walletActsAsDesk = evmConnected;
   const switchTitle =
     path === 'A'
       ? 'Path A settles through a USDC allowance. Click for the Hedera-native batch route, where no allowance is granted at all.'
@@ -196,7 +200,7 @@ export default function EnterPage() {
               {pathConnected
                 ? path === 'A'
                   ? 'Path A contract actions and trade approvals are signed by your EVM wallet.'
-                  : 'The native Hedera session is connected. This confirms wallet compatibility; it does not yet sign or submit an RFQ batch from the browser.'
+                  : 'Both sessions are connected. The Trade is signed with your EVM wallet and the cash leg with your Hedera one, and the venue batches them into a single HIP-551 transaction. No allowance is granted to anything.'
                 : demoMode
                   ? 'You explicitly opened a funded testnet demo desk. Demo balances are labelled and trading signatures still require a wallet.'
                   : 'Public browsing shows no account or balance. Choose a desk above to open its labelled testnet demo, or connect a wallet to act as yourself.'}
