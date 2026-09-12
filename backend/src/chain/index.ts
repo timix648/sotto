@@ -37,6 +37,9 @@ export const SETTLEMENT_ABI = [
   // what settle() will reject them for.
   'function bandBps() view returns (uint16)',
   'function navOracle() view returns (address)',
+  // The authoritative record of which nonces are spent. nonces() returns a
+  // COUNT of settlements, which is a different thing - see safeNonceBase.
+  'function nonceUsed(address,uint256) view returns (bool)',
   'event Settled(bytes32 indexed rfqId,address indexed seller,address indexed buyer,uint256 quantity,uint256 notional,address assetToken,address cashToken)',
 ];
 
@@ -283,6 +286,70 @@ export class Chain {
    * different questions and both belong on screen. Null means no oracle is
    * wired and no price will be refused for being off-market.
    */
+  /**
+   * The first of `count` consecutive nonces that no participant has spent.
+   *
+   * SottoSettlement keeps two different things: `nonceUsed[addr][n]`, the set of
+   * nonces actually consumed, and `_nextNonce[addr]`, a counter incremented once
+   * per settlement and returned by `nonces()`. They agree only while every
+   * assigned nonce is consumed in order, and a partial fill breaks that: a
+   * request awarded nonces 2 and 3 where only 3 settled leaves the counter at 3
+   * and nonce 3 spent. Basing the next award on the counter then handed out a
+   * nonce already in the used set, and the settlement reverted with
+   * NonceAlreadyUsed after the seller had signed.
+   *
+   * So ask the set. Every fill marks its nonce used for the seller AND the
+   * buyer, so a nonce is only safe if it is free for all of them - the dealers
+   * checked here are everyone who revealed, not just the eventual winners,
+   * because the winners are not known until the book is allocated.
+   */
+  /**
+   * Replay a reverted transaction to recover its revert payload.
+   *
+   * Hedera's relay returns `data=null` on the error from a sent transaction, so
+   * a custom error's four bytes never reach the caller and every revert decodes
+   * as UNKNOWN. eth_call against the same block returns them.
+   */
+  async revertDataFor(txHash: string): Promise<string | null> {
+    try {
+      const tx = await this.provider.getTransaction(txHash);
+      if (!tx) return null;
+      await this.provider.call({
+        to: tx.to ?? undefined,
+        from: tx.from,
+        data: tx.data,
+        blockTag: tx.blockNumber ?? undefined,
+      });
+      return null; // replayed without reverting; nothing to decode
+    } catch (e) {
+      const o = e as { data?: unknown; info?: { error?: { data?: unknown } } };
+      const d = o.data ?? o.info?.error?.data;
+      return typeof d === 'string' && d.startsWith('0x') ? d : null;
+    }
+  }
+
+  async safeNonceBase(seller: string, dealers: string[], count: number): Promise<number> {
+    const parties = [seller, ...dealers];
+    const counters = await Promise.all(
+      parties.map((p) => this.settlement.nonces(p) as Promise<bigint>)
+    );
+    let base = Number(counters.reduce((a, b) => (a > b ? a : b), 0n));
+
+    // Bounded: a venue that cannot find a free window in 512 tries has a
+    // problem no retry will fix, and an unbounded loop would hang the award.
+    for (let attempt = 0; attempt < 512; attempt += 1) {
+      const checks: Promise<boolean>[] = [];
+      for (let i = 0; i < count; i += 1) {
+        for (const party of parties) {
+          checks.push(this.settlement.nonceUsed(party, base + i) as Promise<boolean>);
+        }
+      }
+      if (!(await Promise.all(checks)).some(Boolean)) return base;
+      base += 1;
+    }
+    throw new Error(`no free window of ${count} nonces found above ${base}`);
+  }
+
   async navBandBps(): Promise<number | null> {
     try {
       const oracle = (await this.settlement.navOracle?.()) as string | undefined;

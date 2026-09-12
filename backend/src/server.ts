@@ -12,7 +12,7 @@ import { RfqEngine, RfqError } from './rfq/engine.js';
 import { RfqStore } from './rfq/store.js';
 import { Chain, PARTITION_DEFAULT, BOND_ABI as ISSUE_ABI, SETTLEMENT_ABI } from './chain/index.js';
 import { BatchRelay } from './chain/batch.js';
-import { explainRevert } from './chain/revert.js';
+import { explainRevert, revertedTxHash } from './chain/revert.js';
 import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
 import type { WsFrame, Rfq, Trade } from '../../packages/shared/src/types.js';
 
@@ -313,10 +313,19 @@ app.post('/api/rfq/:id/award', async (req) => {
   // so N fills against one seller need N distinct nonces. Start from the
   // seller's current on-chain nonce so a replay of an earlier RFQ's trade
   // cannot collide with this one.
-  const seller = engine.get(id).rfq.seller;
+  const rec = engine.get(id);
+  const seller = rec.rfq.seller;
+  // nonces() is a COUNT of settlements, not the set of spent nonces, and the two
+  // diverge the moment a fill is awarded and never settles. Basing an award on
+  // the counter handed out a nonce already in the used set, and the trade
+  // reverted with NonceAlreadyUsed after the seller had signed it. Ask the set.
   const nonceBase = b.nonceBase !== undefined
     ? Number(b.nonceBase)
-    : Number(await chain.settlement.nonces(seller));
+    : await chain.safeNonceBase(
+        seller,
+        rec.reveals.filter((q) => q.valid).map((q) => q.dealer),
+        Math.max(rec.reveals.length, 1)
+      );
   const { dealer, trade, fills } = await engine.award(id, env.SETTLEMENT_ADDRESS, undefined, nonceBase);
   const rfq = engine.get(id).rfq;
   broadcast({ type: 'awarded', rfqId: id, dealer, trade, fills, filled: rfq.filled, unfilled: rfq.unfilled }, id);
@@ -439,7 +448,15 @@ app.post('/api/rfq/:id/settle-batch', async (req) => {
     // against - reports CALL_EXCEPTION and attaches the entire receipt. That
     // blob used to reach the settlement view verbatim: five lines of logsBloom
     // with the one useful fact nowhere in it. Decode it where the ABI is known.
-    const { code, message, raw } = explainRevert(e);
+    // Hedera's relay attaches no revert data to a send error, so a custom
+    // error's four bytes are only recoverable by replaying the call.
+    let ex = explainRevert(e);
+    if (ex.code === 'UNKNOWN') {
+      const hash = revertedTxHash(e);
+      const data = hash ? await chain.revertDataFor(hash).catch(() => null) : null;
+      if (data) ex = explainRevert(e, data);
+    }
+    const { code, message, raw } = ex;
     const rfq = await engine.markReverted(id, message, { code, raw },
       (settledFillNonces.get(id) ?? new Set()).size);
     broadcast({ type: 'reverted', rfqId: id, reason: message }, id);
@@ -493,7 +510,15 @@ app.post('/api/rfq/:id/settle', async (req) => {
     // against - reports CALL_EXCEPTION and attaches the entire receipt. That
     // blob used to reach the settlement view verbatim: five lines of logsBloom
     // with the one useful fact nowhere in it. Decode it where the ABI is known.
-    const { code, message, raw } = explainRevert(e);
+    // Hedera's relay attaches no revert data to a send error, so a custom
+    // error's four bytes are only recoverable by replaying the call.
+    let ex = explainRevert(e);
+    if (ex.code === 'UNKNOWN') {
+      const hash = revertedTxHash(e);
+      const data = hash ? await chain.revertDataFor(hash).catch(() => null) : null;
+      if (data) ex = explainRevert(e, data);
+    }
+    const { code, message, raw } = ex;
     const rfq = await engine.markReverted(id, message, { code, raw },
       (settledFillNonces.get(id) ?? new Set()).size);
     broadcast({ type: 'reverted', rfqId: id, reason: message }, id);

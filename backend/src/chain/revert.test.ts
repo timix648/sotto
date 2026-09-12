@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ethers } from 'ethers';
-import { explainRevert } from './revert.js';
+import { explainRevert, revertedTxHash } from './revert.js';
 
 const iface = new ethers.Interface([
   'error DeadlineExpired(uint256 deadline, uint256 nowTs)',
@@ -117,4 +117,35 @@ test('an unknown revert admits it rather than dumping the receipt', () => {
   assert.equal(out.code, 'UNKNOWN');
   assert.doesNotMatch(out.message, /logsBloom|0xdeadbeef/);
   assert.match(out.message, /Nothing moved/);
+});
+
+test('the hash is found so a payload-less error can be replayed', () => {
+  // Hedera's relay reports data=null on a send error; the only way to the four
+  // bytes is eth_call against the same block, and that needs the hash.
+  const e = new Error('transaction execution reverted (data=null, revert=null)');
+  (e as unknown as { receipt: unknown }).receipt = {
+    hash: '0x0327e3733dab272afcc9d9bff385cf0cf3788753048b17ccc6004a7cf84db6e6',
+    status: 0,
+  };
+  assert.equal(
+    revertedTxHash(e),
+    '0x0327e3733dab272afcc9d9bff385cf0cf3788753048b17ccc6004a7cf84db6e6'
+  );
+  assert.equal(explainRevert(e).code, 'UNKNOWN');
+});
+
+test('a replayed payload decodes the error the send error could not', () => {
+  // The real one: an award based on nonces() handed out a nonce the used-set
+  // already held, and the trade reverted after the seller had signed it.
+  const e = new Error('transaction execution reverted (data=null)');
+  const data = new ethers.Interface(['error NonceAlreadyUsed(address,uint256)'])
+    .encodeErrorResult('NonceAlreadyUsed', [
+      '0x823C1545B90F4A2a28a3Ee31DF07EBdF1c2a2D1C', 3n,
+    ]);
+
+  assert.equal(explainRevert(e).code, 'UNKNOWN');
+  const out = explainRevert(e, data);
+  assert.equal(out.code, 'NONCE_USED');
+  assert.match(out.message, /already settled/);
+  assert.match(out.message, /nonce 3/);
 });

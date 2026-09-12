@@ -87,9 +87,34 @@ function revertData(e: unknown): string | null {
   return null;
 }
 
-export function explainRevert(e: unknown): Explained {
+/**
+ * The reverted transaction's hash, when the error carries a receipt.
+ *
+ * Needed because Hedera's JSON-RPC relay does not attach revert data to the
+ * error from a sent transaction - `data=null, reason=null, revert=null`. The
+ * payload is only obtainable by replaying the call, and that needs the hash.
+ */
+export function revertedTxHash(e: unknown): string | null {
+  const seen = new Set<unknown>();
+  let cur: unknown = e;
+  while (cur && typeof cur === 'object' && !seen.has(cur)) {
+    seen.add(cur);
+    const o = cur as Record<string, unknown>;
+    const receipt = o.receipt as Record<string, unknown> | undefined;
+    if (typeof receipt?.hash === 'string') return receipt.hash;
+    if (typeof o.transactionHash === 'string') return o.transactionHash;
+    cur = o.error ?? o.cause ?? o.info;
+  }
+  return null;
+}
+
+/**
+ * @param override revert payload recovered by replaying the call, for the case
+ *        above where the error itself carries none.
+ */
+export function explainRevert(e: unknown, override?: string | null): Explained {
   const raw = e instanceof Error ? e.message.split('\n')[0] : String(e);
-  const data = revertData(e);
+  const data = override ?? revertData(e);
 
   if (data) {
     let parsed: ethers.ErrorDescription | null = null;
