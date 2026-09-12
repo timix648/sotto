@@ -383,7 +383,7 @@ function CommitForm({
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Price"
-          hint={`per unit, in cash base units${nav ? ` · NAV mark ${formatPrice(nav, cashDecimals)}` : ''}`}
+          hint={`per 100 nominal — 100 is par${nav ? ` · NAV mark ${formatPrice(nav, cashDecimals)}` : ''}`}
           suffix="USDC"
         >
           <Input
@@ -410,7 +410,22 @@ function CommitForm({
             invalid={Boolean(minQuantity) && !parsedMinQuantity}
           />
         </Field>
-        <Field label="Notional" hint={`${formatQty(parsedQuantity, 0)} units at your price`}>
+        {/*
+          Spelling out the per-unit cost, because "98.35" and "0.9835" are the
+          same price and only one of them is the right thing to type. A dealer
+          who reads the field as per-unit enters 0.98 and finds out at
+          settlement, where the band refuses it as a 99% discount to par.
+        */}
+        <Field
+          label="Notional"
+          hint={
+            parsedQuantity && parsed
+              ? `${formatQty(parsedQuantity, 0)} units at ${formatPrice(parsed, cashDecimals)} per 100 nominal = ${formatPrice(
+                  (BigInt(parsed) / 100n).toString(), cashDecimals
+                )} each`
+              : `${formatQty(parsedQuantity, 0)} units at your price`
+          }
+        >
           <div className="w-full bg-raised border border-line rounded-md px-3 py-2 text-sm num text-txt">
             {notional ? formatCash(notional, cashDecimals) : '—'}
           </div>

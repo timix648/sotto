@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 export interface SealedQuote {
   rfqId: string;
   dealer: string;
-  /** cash base units per one whole asset unit */
+  /** cash base units per 100 nominal - the bond convention, not per unit */
   price: string;
   quantity: string;
   minQuantity?: string;

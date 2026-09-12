@@ -101,7 +101,13 @@ export function formatCash(value: string | bigint | null | undefined, decimals =
   return formatAmount(value, decimals, { minFrac: 2, maxFrac: 2 });
 }
 
-/** A quote price: cash base units per one whole asset unit. */
+/**
+ * A quote price: cash base units per 100 NOMINAL, not per unit.
+ *
+ * Bonds are quoted as a percentage of face value - 100 is par - so a note
+ * marked 98.35 costs 0.9835 per unit of 1.00 face. settle() reverses it the
+ * same way: impliedPrice = notional * 100 / quantity.
+ */
 export function formatPrice(value: string | bigint | null | undefined, decimals = 6): string {
   return formatAmount(value, decimals, { minFrac: 2, maxFrac: 4 });
 }
