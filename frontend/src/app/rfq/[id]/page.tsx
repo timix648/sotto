@@ -36,6 +36,7 @@ export default function RfqPage({ params }: { params: Promise<{ id: string }> })
 
   const seller = rfq?.seller ?? null;
   const buyer = award?.dealer ?? null;
+
   const { data: sellerBal } = useBalances(seller);
   const { data: buyerBal } = useBalances(buyer);
 
@@ -46,12 +47,61 @@ export default function RfqPage({ params }: { params: Promise<{ id: string }> })
   // The outcome is read from the record, never inferred from a balance looking
   // different — MECHANICS §4.10: "a successful settlement displayed as a failure,
   // because the success check read a field that was undefined."
+  // PARTIALLY_SETTLED counts as settled here: cash and securities did move, and
+  // this drives the ledger panel, which is about whether balances changed. Which
+  // individual fill failed is shown on that fill, below.
   const outcome: LedgerOutcome =
-    settlement?.status === 'SETTLED' || rfq?.status === 'SETTLED'
+    settlement?.status === 'SETTLED'
+    || rfq?.status === 'SETTLED'
+    || rfq?.status === 'PARTIALLY_SETTLED'
       ? 'settled'
       : settlement?.status === 'REVERTED' || rfq?.status === 'FAILED'
         ? 'reverted'
         : 'pending';
+
+  /**
+   * Each fill, paired with the transaction that settled it.
+   *
+   * Partial settlements always carried their nonce in the audit; the final one
+   * - the transaction that completes the block - did not, so a two-dealer fill
+   * had one transaction it could attribute and one it could only guess at. The
+   * venue names it now, and anything older falls back to the settlement's own
+   * hash so historical requests still link somewhere true.
+   */
+  const swaps = useMemo(() => {
+    const fills = detail?.fills ?? [];
+    if (fills.length < 1) return [];
+    const settledNonces = new Set(detail?.settledFillNonces ?? []);
+    // Once the request stops trading, a fill that has not settled never will.
+    const terminal = ['SETTLED', 'PARTIALLY_SETTLED', 'FAILED', 'EXPIRED']
+      .includes(detail?.rfq?.status ?? '');
+    const events = (detail?.audit ?? []).filter((e) => e.kind === 'SETTLED');
+
+    return fills.map((f) => {
+      const t = f.trade;
+      const ev = events.find(
+        (e) => (e.payload as { nonce?: string } | undefined)?.nonce === t.nonce
+      );
+      const settled = settledNonces.has(t.nonce);
+      return {
+        nonce: t.nonce,
+        buyer: t.buyer,
+        quantity: t.quantity,
+        notional: t.notional,
+        price: f.price,
+        // A fill's fate is its own. Judging it by the request's overall status
+        // hid the failed half of a partial settlement behind an overall
+        // "settled", and vice versa.
+        outcome: (settled
+          ? 'settled'
+          : terminal ? 'reverted' : 'pending') as LedgerOutcome,
+        txHash:
+          ((ev?.payload as { txHash?: string } | undefined)?.txHash)
+          ?? (fills.length === 1 ? settlement?.txHash ?? null : null),
+        hcsSequence: ev?.hcsSequenceNumber ?? null,
+      };
+    });
+  }, [detail?.fills, detail?.settledFillNonces, detail?.audit, detail?.rfq?.status, settlement?.txHash]);
 
   // Balances as they stood before settlement was attempted, so B5 can show
   // "before → after, unchanged" rather than asserting it.
@@ -122,26 +172,63 @@ export default function RfqPage({ params }: { params: Promise<{ id: string }> })
         </div>
       </div>
 
-      {/* The swap itself: two legs, opposite directions, one transaction. */}
-      <SettlementSwap
-        outcome={outcome}
-        seller={seller}
-        buyer={buyer}
-        quantity={award?.quantity ?? rfq.quantity}
-        assetSymbol={rfq.assetSymbol}
-        assetDecimals={assetDecimals}
-        notional={
-          award ? (award.notional ?? computeNotional(award.price, rfq.quantity)) : null
-        }
-        cashSymbol={sellerBal?.cash?.[0]?.symbol ?? 'USDC'}
-        cashDecimals={cashDecimals}
-        txHash={settlement?.txHash ?? null}
-        hcsSequence={
-          detail?.audit?.find((e) => e.kind === 'SETTLED' || e.kind === 'SETTLEMENT_REVERTED')
-            ?.hcsSequenceNumber ?? null
-        }
-        path={settlement?.path ?? null}
-      />
+      {/*
+        One swap per fill. A block filled across two dealers was rendering as a
+        single trade - the header said 9 units, the swap underneath said 5, and
+        the dealer who took the other 4 did not appear anywhere. Each fill is
+        its own Trade, its own signatures and its own transaction; showing one
+        of them and calling it the settlement misrepresents the feature the
+        venue exists for.
+      */}
+      {swaps.length ? (
+        swaps.map((s, i) => (
+          <div key={s.nonce ?? i} className="space-y-2">
+            {swaps.length > 1 && (
+              <div className="flex items-baseline justify-between px-1 text-2xs text-dim">
+                <span className="label">Fill {i + 1} of {swaps.length}</span>
+                <span className="num">
+                  {formatQty(s.quantity, assetDecimals)} {rfq.assetSymbol} @{' '}
+                  {formatPrice(s.price, cashDecimals)}
+                </span>
+              </div>
+            )}
+            <SettlementSwap
+              outcome={s.outcome}
+              seller={seller}
+              buyer={s.buyer}
+              quantity={s.quantity}
+              assetSymbol={rfq.assetSymbol}
+              assetDecimals={assetDecimals}
+              notional={s.notional}
+              cashSymbol={sellerBal?.cash?.[0]?.symbol ?? 'USDC'}
+              cashDecimals={cashDecimals}
+              txHash={s.txHash}
+              hcsSequence={s.hcsSequence}
+              path={settlement?.path ?? null}
+            />
+          </div>
+        ))
+      ) : (
+        <SettlementSwap
+          outcome={outcome}
+          seller={seller}
+          buyer={buyer}
+          quantity={award?.quantity ?? rfq.quantity}
+          assetSymbol={rfq.assetSymbol}
+          assetDecimals={assetDecimals}
+          notional={
+            award ? (award.notional ?? computeNotional(award.price, rfq.quantity)) : null
+          }
+          cashSymbol={sellerBal?.cash?.[0]?.symbol ?? 'USDC'}
+          cashDecimals={cashDecimals}
+          txHash={settlement?.txHash ?? null}
+          hcsSequence={
+            detail?.audit?.find((e) => e.kind === 'SETTLED' || e.kind === 'SETTLEMENT_REVERTED')
+              ?.hcsSequenceNumber ?? null
+          }
+          path={settlement?.path ?? null}
+        />
+      )}
 
       {/* B4 — both ledgers, side by side, in one glance. */}
       <DualLedger

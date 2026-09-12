@@ -442,9 +442,22 @@ export class RfqEngine {
     return { ...r.award, fills };
   }
 
-  async markSettled(id: string, txHash: string): Promise<Rfq> {
+  /**
+   * `detail` names which fill this transaction settled.
+   *
+   * Every partial settlement already recorded its nonce, dealer and size; the
+   * last one - the one that completes the block - did not, because it goes
+   * through here instead. The settlement view then had one transaction it could
+   * attribute and one it could only guess at, so it showed the first fill and
+   * nothing else. A block filled across two dealers rendered as a single trade.
+   */
+  async markSettled(
+    id: string,
+    txHash: string,
+    detail: { nonce?: string; dealer?: string; quantity?: string } = {}
+  ): Promise<Rfq> {
     const r = this.get(id);
-    r.audit.push(await this.audit(id, 'SETTLED', { txHash }));
+    r.audit.push(await this.audit(id, 'SETTLED', { txHash, ...detail }));
     r.rfq.status = 'SETTLED';
     return r.rfq;
   }

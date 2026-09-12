@@ -424,7 +424,10 @@ app.post('/api/rfq/:id/settle-batch', async (req) => {
     completed.add(trade.nonce);
     settledFillNonces.set(id, completed);
     const allSettled = rec.fills.every((fill) => completed.has(fill.trade.nonce));
-    const rfq = allSettled ? await engine.markSettled(id, result.transactionId) : rec.rfq;
+    const rfq = allSettled
+      ? await engine.markSettled(id, result.transactionId,
+          { nonce: trade.nonce, dealer: trade.buyer, quantity: trade.quantity })
+      : rec.rfq;
     if (!allSettled) {
       rec.audit.push(await hcs.write(id, 'SETTLED', {
         txHash: result.transactionId, nonce: trade.nonce, dealer: trade.buyer,
@@ -487,7 +490,8 @@ app.post('/api/rfq/:id/settle', async (req) => {
     settledFillNonces.set(id, completed);
     const allSettled = rec.fills.every((fill) => completed.has(fill.trade.nonce));
     const rfq = allSettled
-      ? await engine.markSettled(id, tx.hash)
+      ? await engine.markSettled(id, tx.hash,
+        { nonce: trade.nonce, dealer: trade.buyer, quantity: trade.quantity })
       : rec.rfq;
     if (!allSettled) {
       rec.audit.push(await hcs.write(id, 'SETTLED', {
