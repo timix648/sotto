@@ -426,7 +426,18 @@ function CommitForm({
               : `${formatQty(parsedQuantity, 0)} units at your price`
           }
         >
-          <div className="w-full bg-raised border border-line rounded-md px-3 py-2 text-sm num text-txt">
+          <div
+            className="w-full bg-raised border border-line rounded-md px-3 py-2 text-sm num text-txt"
+            title={
+              notional && parsed && parsedQuantity
+                ? `You pay ${formatCash(notional, cashDecimals)} USDC in total if this quote is filled `
+                  + `for its full size: ${formatQty(parsedQuantity, 0)} units at `
+                  + `${formatPrice(parsed, cashDecimals)} per 100 nominal, which is `
+                  + `${formatPrice((BigInt(parsed) / 100n).toString(), cashDecimals)} per unit. `
+                  + `A partial fill costs proportionally less, never more.`
+                : 'Enter a price and a size to see what this quote would cost you.'
+            }
+          >
             {notional ? formatCash(notional, cashDecimals) : '—'}
           </div>
         </Field>
