@@ -5,7 +5,7 @@
 // The order of this page is the order of the story: the position first (the
 // four numbers), then the offer that moves two of them, then the sealed board
 // the offer produces. A viewer should be able to follow it without narration.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Panel, Empty } from '@/components/ui/Panel';
 import { Button } from '@/components/ui/Button';
@@ -23,7 +23,7 @@ import { api, errorCopy } from '@/lib/api';
 import { useSignTrade } from '@/lib/sign';
 import { holdAbi, holdReadAbi, releaseHoldAbi, DEFAULT_HOLD_SECONDS } from '@/lib/ats';
 import { formatQty, formatPrice, parseAmount } from '@/lib/format';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePublicClient, useWriteContract } from 'wagmi';
 import { getAddress, zeroAddress, type Hex } from 'viem';
 import type { Rfq } from '@sotto/shared';
@@ -42,6 +42,14 @@ export default function SellerPage() {
   );
   const active = mine.find((r) => ['OPEN', 'REVEALING', 'AWARDED'].includes(r.status)) ?? null;
   const past = mine.filter((r) => !active || r.id !== active.id);
+  // A finished request can still hold units: the remainder of a partial fill, or
+  // everything, when the request failed. Nothing on-chain releases it, and the
+  // button on the live request is out of reach once the request is no longer
+  // live - which is precisely when a seller needs it.
+  const finished = useMemo(
+    () => past.filter((r) => r.holdId != null && ['SETTLED', 'FAILED', 'EXPIRED'].includes(r.status)),
+    [past]
+  );
 
   const position = balances?.assets?.[0] ?? null;
   const cash = balances?.cash?.[0] ?? null;
@@ -90,12 +98,14 @@ export default function SellerPage() {
             rfqs={rfqs && past}
             title="Your requests"
             subtitle="Everything you have put up for bid"
-            emptyMessage="You have not offered a block yet."
+            emptyMessage="No finished requests yet."
             assetDecimals={position?.decimals ?? 0}
             dense
           />
         </div>
       </div>
+
+      <StrandedEscrow rfqs={finished} assetDecimals={position?.decimals ?? 0} />
     </Shell>
   );
 }
@@ -269,6 +279,173 @@ function OfferForm({
   );
 }
 
+/**
+ * Return a request's escrow to the seller.
+ *
+ * Shared because there are two places a seller needs it and they are not the
+ * same moment. One is a request still on screen. The other is a request that
+ * has already finished - and that is the common case, because a hold outlives
+ * the request that created it: 23 of 30 units fill, the RFQ settles, and the
+ * remaining 7 sit escrowed with nothing on-chain aware the auction is over.
+ *
+ * Returns the number of units freed; 0 means the hold was already empty.
+ */
+function useReleaseEscrow() {
+  const { address } = useRole();
+  const { data: health } = useHealth();
+  const publicClient = usePublicClient();
+  const { writeContractAsync } = useWriteContract();
+  const qc = useQueryClient();
+
+  return useCallback(
+    async (rfq: Rfq): Promise<bigint> => {
+      if (!publicClient) throw new Error('No RPC client.');
+      if (!health?.settlementAddress) throw new Error('The venue has not reported a settlement address.');
+      if (rfq.holdId == null) throw new Error('This request never escrowed a hold.');
+      if (!address || address.toLowerCase() !== rfq.seller.toLowerCase()) {
+        throw new Error('Connect the seller wallet that opened this request before releasing its escrow.');
+      }
+
+      // Release what the HOLD still contains, not what the engine calls
+      // unfilled. Those differ whenever a fill was awarded and never settled:
+      // the units are allocated in the book but have not left the escrow, so a
+      // request reading filled 23 / unfilled 2 can still be sitting on all 25.
+      // Releasing `unfilled` there frees 2 and strands 23. The hold is the
+      // truth - executeHoldByPartition decrements it as fills actually settle.
+      const [heldNow] = await publicClient.readContract({
+        address: getAddress(rfq.assetToken),
+        abi: holdReadAbi,
+        functionName: 'getHoldForByPartition',
+        args: [{
+          partition: rfq.partition as Hex,
+          tokenHolder: getAddress(rfq.seller),
+          holdId: BigInt(rfq.holdId),
+        }],
+      });
+      if (heldNow === 0n) return 0n;
+
+      const simulation = await publicClient.simulateContract({
+        address: getAddress(health.settlementAddress),
+        abi: releaseHoldAbi,
+        functionName: 'releaseHold',
+        args: [
+          getAddress(rfq.assetToken),
+          rfq.partition as Hex,
+          getAddress(rfq.seller),
+          BigInt(rfq.holdId),
+          heldNow,
+        ],
+        account: getAddress(address),
+      });
+      const txHash = await writeContractAsync(simulation.request);
+      await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+      qc.invalidateQueries({ queryKey: qk.rfq(rfq.id) });
+      qc.invalidateQueries({ queryKey: ['balances'] });
+      qc.invalidateQueries({ queryKey: ['rfqs'] });
+      return heldNow;
+    },
+    [address, health?.settlementAddress, publicClient, writeContractAsync, qc]
+  );
+}
+
+// --------------------------------------------------------- escrow left behind
+
+/**
+ * Holds that outlived their request.
+ *
+ * An ATS hold runs for 48 hours on its own clock and knows nothing about the
+ * RFQ that created it. Fill 23 of 30 and the other 7 stay escrowed; fail to
+ * settle at all and the whole block does. The seller sees the size vanish from
+ * Available with nothing on screen explaining where it went or how to get it
+ * back, because the request it belonged to is finished and off the live panel.
+ *
+ * Each row asks the chain what its hold actually contains, so a request that
+ * has already been released simply does not appear.
+ */
+function StrandedEscrow({ rfqs, assetDecimals }: { rfqs: Rfq[]; assetDecimals: number }) {
+  if (!rfqs.length) return null;
+  return (
+    <div className="space-y-2">
+      {rfqs.map((r) => (
+        <StrandedRow key={r.id} rfq={r} assetDecimals={assetDecimals} />
+      ))}
+    </div>
+  );
+}
+
+function StrandedRow({ rfq, assetDecimals }: { rfq: Rfq; assetDecimals: number }) {
+  const publicClient = usePublicClient();
+  const { address, isWallet } = useRole();
+  const releaseHold = useReleaseEscrow();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const { data: held } = useQuery({
+    queryKey: ['hold', rfq.assetToken, rfq.seller, rfq.holdId],
+    enabled: Boolean(publicClient && rfq.holdId != null),
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const [amount] = await publicClient!.readContract({
+        address: getAddress(rfq.assetToken),
+        abi: holdReadAbi,
+        functionName: 'getHoldForByPartition',
+        args: [{
+          partition: rfq.partition as Hex,
+          tokenHolder: getAddress(rfq.seller),
+          holdId: BigInt(rfq.holdId as number),
+        }],
+      });
+      return amount.toString();
+    },
+  });
+
+  // Nothing escrowed, nothing to say.
+  if (!held || held === '0') return null;
+
+  const mine = isWallet && address?.toLowerCase() === rfq.seller.toLowerCase();
+
+  async function release() {
+    setBusy(true);
+    setError(null);
+    try {
+      await releaseHold(rfq);
+      qc.invalidateQueries({ queryKey: ['hold', rfq.assetToken, rfq.seller, rfq.holdId] });
+    } catch (e) {
+      setError(errorCopy(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Escrow still held"
+      subtitle={`Hold #${rfq.holdId} from a request that is ${rfq.status.toLowerCase()}`}
+      right={mine ? (
+        <Button onClick={release} busy={busy} disabled={busy}>
+          Release {formatQty(held, assetDecimals)} {rfq.assetSymbol}
+        </Button>
+      ) : undefined}
+    >
+      <div className="text-xs text-muted">
+        <span className="num text-txt">{formatQty(held, assetDecimals)}</span>{' '}
+        {rfq.assetSymbol} {held === '1' ? 'is' : 'are'} escrowed against request{' '}
+        <Addr value={rfq.id} />, which is no longer trading. The ATS hold runs for 48 hours
+        whatever the venue thinks, so these units stay out of your available balance until you
+        release them or the hold expires. Only you can do it — the venue cannot touch your
+        escrow.
+      </div>
+      {error && (
+        <div className="mt-3">
+          <Callout tone="neg" title="The escrow was not released">{error}</Callout>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 // ----------------------------------------------------------- the active offer
 
 function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) {
@@ -284,8 +461,7 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
   const [closing, setClosing] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const publicClient = usePublicClient();
-  const { writeContractAsync } = useWriteContract();
+  const releaseHold = useReleaseEscrow();
 
   useRfqSubscription(rfq.id);
 
@@ -330,53 +506,13 @@ function ActiveOffer({ rfq, cashDecimals }: { rfq: Rfq; cashDecimals: number }) 
   // and left them uncounted as Available. The contract only lets the holder do
   // this, so it is signed here rather than relayed by the venue.
   async function releaseEscrow() {
-    if (!publicClient || !health?.settlementAddress || current.holdId == null) return;
-    if (!isWallet || !address || address.toLowerCase() !== current.seller.toLowerCase()) {
-      setError('Connect the seller wallet that opened this RFQ before releasing the escrow.');
-      return;
-    }
-    setReleasing(true);
     setError(null);
+    setReleasing(true);
     try {
-      // Release what the HOLD still contains, not what the engine calls
-      // unfilled. Those differ whenever a fill was awarded and never settled:
-      // the units are allocated in the book but have not left the escrow, so an
-      // RFQ reading filled 23 / unfilled 2 can still be sitting on all 25.
-      // Releasing `unfilled` there frees 2 and strands 23. The hold is the
-      // truth - executeHoldByPartition decrements it as fills actually settle.
-      const [heldNow] = await publicClient.readContract({
-        address: getAddress(current.assetToken),
-        abi: holdReadAbi,
-        functionName: 'getHoldForByPartition',
-        args: [{
-          partition: current.partition as Hex,
-          tokenHolder: getAddress(current.seller),
-          holdId: BigInt(current.holdId),
-        }],
-      });
-      if (heldNow === 0n) {
-        setError('This hold is already empty — nothing is escrowed against this request.');
-        return;
+      const freed = await releaseHold(current);
+      if (freed === 0n) {
+        setError('This hold is already empty - nothing is escrowed against this request.');
       }
-
-      const simulation = await publicClient.simulateContract({
-        address: getAddress(health.settlementAddress),
-        abi: releaseHoldAbi,
-        functionName: 'releaseHold',
-        args: [
-          getAddress(current.assetToken),
-          current.partition as Hex,
-          getAddress(current.seller),
-          BigInt(current.holdId),
-          heldNow,
-        ],
-        account: getAddress(address),
-      });
-      const txHash = await writeContractAsync(simulation.request);
-      await publicClient.waitForTransactionReceipt({ hash: txHash });
-      qc.invalidateQueries({ queryKey: qk.rfq(rfq.id) });
-      qc.invalidateQueries({ queryKey: ['balances'] });
-      qc.invalidateQueries({ queryKey: ['rfqs'] });
     } catch (e) {
       setError(errorCopy(e));
     } finally {
