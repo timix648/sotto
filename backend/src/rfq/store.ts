@@ -21,32 +21,66 @@ import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from '
 import { dirname } from 'node:path';
 import type { RfqRecord } from './engine.js';
 
+/**
+ * Everything a restart must not forget.
+ *
+ * The engine's records were snapshotted from the start; the seller's signatures
+ * and the set of fills already settled were not, because they live in the
+ * server rather than the engine. A restart therefore came back believing no
+ * fill had settled - for trades whose nonces were consumed on-chain and whose
+ * cash had moved. The portal would have offered to settle them again, and the
+ * request that reverted afterwards could not tell whether it was a total
+ * failure or a partial one.
+ *
+ * Maps and Sets do not survive JSON, so they cross as plain objects and arrays.
+ */
+export interface Snapshot {
+  records: RfqRecord[];
+  /** rfqId -> fill nonce -> the seller's EIP-712 signature. */
+  sellerSignatures: Record<string, Record<string, string>>;
+  /** rfqId -> fill nonces already settled on-chain. */
+  settledFillNonces: Record<string, string[]>;
+}
+
+const EMPTY: Snapshot = { records: [], sellerSignatures: {}, settledFillNonces: {} };
+
 export class RfqStore {
   constructor(readonly path: string) {}
 
-  load(): RfqRecord[] {
-    if (!existsSync(this.path)) return [];
+  load(): Snapshot {
+    if (!existsSync(this.path)) return EMPTY;
     try {
       const parsed: unknown = JSON.parse(readFileSync(this.path, 'utf8'));
-      if (!Array.isArray(parsed)) {
-        console.warn(`[store] ${this.path} is not an array of records; starting empty`);
-        return [];
+
+      // The first format was a bare array of records. A venue mid-demo should
+      // not lose its book to a schema change, so that shape still loads.
+      if (Array.isArray(parsed)) {
+        return { ...EMPTY, records: parsed as RfqRecord[] };
       }
-      return parsed as RfqRecord[];
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Snapshot).records)) {
+        const p = parsed as Snapshot;
+        return {
+          records: p.records,
+          sellerSignatures: p.sellerSignatures ?? {},
+          settledFillNonces: p.settledFillNonces ?? {},
+        };
+      }
+      console.warn(`[store] ${this.path} is not a snapshot; starting empty`);
+      return EMPTY;
     } catch (e) {
       // A corrupt snapshot must not stop the venue from starting. Say so loudly
       // and carry on empty: the holds are still on-chain either way, and an API
       // that refuses to boot helps nobody.
       console.error(`[store] could not read ${this.path}:`, (e as Error).message);
-      return [];
+      return EMPTY;
     }
   }
 
-  save(records: RfqRecord[]): void {
+  save(snapshot: Snapshot): void {
     try {
       mkdirSync(dirname(this.path), { recursive: true });
       const tmp = `${this.path}.tmp`;
-      writeFileSync(tmp, JSON.stringify(records, null, 2), { mode: 0o600 });
+      writeFileSync(tmp, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
       renameSync(tmp, this.path);
     } catch (e) {
       // Losing durability is bad; losing the request in flight is worse. The

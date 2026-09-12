@@ -36,13 +36,49 @@ function record(id: string, status: RfqRecord['rfq']['status'] = 'OPEN'): RfqRec
   };
 }
 
+const snap = (records: RfqRecord[], extra: Partial<{
+  sellerSignatures: Record<string, Record<string, string>>;
+  settledFillNonces: Record<string, string[]>;
+}> = {}) => ({
+  records,
+  sellerSignatures: extra.sellerSignatures ?? {},
+  settledFillNonces: extra.settledFillNonces ?? {},
+});
+
 test('a saved book comes back identical', () => {
   const path = join(dir(), 'book.json');
   const store = new RfqStore(path);
-  const records = [record('a'), record('b', 'AWARDED')];
+  const s = snap([record('a'), record('b', 'AWARDED')]);
 
-  store.save(records);
-  assert.deepEqual(store.load(), records);
+  store.save(s);
+  assert.deepEqual(store.load(), s);
+});
+
+test('the seller signatures and settled fills survive too', () => {
+  // What a restart used to lose. The nonces were consumed on-chain and the cash
+  // had moved; coming back believing nothing had settled would have offered the
+  // same fill for settlement twice, and mislabelled a partial failure as total.
+  const path = join(dir(), 'book.json');
+  const store = new RfqStore(path);
+  store.save(snap([record('a', 'AWARDED')], {
+    sellerSignatures: { a: { '0': '0x36f8ebbc', '1': '0x394d49df' } },
+    settledFillNonces: { a: ['1'] },
+  }));
+
+  const back = store.load();
+  assert.deepEqual(back.sellerSignatures.a, { '0': '0x36f8ebbc', '1': '0x394d49df' });
+  assert.deepEqual(back.settledFillNonces.a, ['1']);
+});
+
+test('a book written in the original array format still loads', () => {
+  // A venue mid-demo should not lose its book to a schema change.
+  const path = join(dir(), 'book.json');
+  writeFileSync(path, JSON.stringify([record('a')]));
+
+  const back = new RfqStore(path).load();
+  assert.equal(back.records.length, 1);
+  assert.deepEqual(back.sellerSignatures, {});
+  assert.deepEqual(back.settledFillNonces, {});
 });
 
 test('an engine rehydrated from a snapshot serves the same requests', () => {
@@ -53,13 +89,13 @@ test('an engine rehydrated from a snapshot serves the same requests', () => {
     throw new Error('the audit writer must not be called by dump/hydrate');
   });
   before.hydrate([record('a'), record('b')]);
-  store.save(before.dump());
+  store.save(snap(before.dump()));
 
   // A brand new process, reading what the old one left behind.
   const after = new RfqEngine(async () => {
     throw new Error('the audit writer must not be called by dump/hydrate');
   });
-  after.hydrate(store.load());
+  after.hydrate(store.load().records);
 
   assert.deepEqual(after.list().map((r) => r.id).sort(), ['a', 'b']);
   // The hold is the point: it outlives the process, so the request that
@@ -69,37 +105,37 @@ test('an engine rehydrated from a snapshot serves the same requests', () => {
 
 test('a missing snapshot is an empty book, not a crash', () => {
   const store = new RfqStore(join(dir(), 'nothing-here.json'));
-  assert.deepEqual(store.load(), []);
+  assert.deepEqual(store.load().records, []);
 });
 
 test('a corrupt snapshot is an empty book, not a crash', () => {
   const path = join(dir(), 'book.json');
   writeFileSync(path, '{ this is not json');
-  assert.deepEqual(new RfqStore(path).load(), []);
+  assert.deepEqual(new RfqStore(path).load().records, []);
 });
 
 test('a snapshot that is valid json but the wrong shape is refused', () => {
   const path = join(dir(), 'book.json');
-  writeFileSync(path, '{"records": []}');
-  assert.deepEqual(new RfqStore(path).load(), []);
+  writeFileSync(path, '{"notARecordList": true}');
+  assert.deepEqual(new RfqStore(path).load().records, []);
 });
 
 test('saving creates missing directories and leaves no temp file behind', () => {
   const path = join(dir(), 'nested', 'deeper', 'book.json');
   const store = new RfqStore(path);
-  store.save([record('a')]);
+  store.save(snap([record('a')]));
 
   assert.ok(existsSync(path));
   assert.equal(existsSync(`${path}.tmp`), false);
-  assert.equal(store.load().length, 1);
+  assert.equal(store.load().records.length, 1);
 });
 
 test('each save replaces the last, so a shrinking book does not leave ghosts', () => {
   const path = join(dir(), 'book.json');
   const store = new RfqStore(path);
 
-  store.save([record('a'), record('b'), record('c')]);
-  store.save([record('a')]);
+  store.save(snap([record('a'), record('b'), record('c')]));
+  store.save(snap([record('a')]));
 
-  assert.deepEqual(store.load().map((r) => r.rfq.id), ['a']);
+  assert.deepEqual(store.load().records.map((r) => r.rfq.id), ['a']);
 });

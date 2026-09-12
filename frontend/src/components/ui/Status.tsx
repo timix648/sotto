@@ -10,6 +10,7 @@ const STATUS_STYLE: Record<RfqStatus, string> = {
   REVEALING: 'text-held bg-held/10 border-held/30',
   AWARDED: 'text-held bg-held/10 border-held/30',
   SETTLED: 'text-pos bg-pos/10 border-pos/30',
+  PARTIALLY_SETTLED: 'text-pos bg-pos/10 border-pos/30',
   EXPIRED: 'text-dim bg-raised border-line',
   FAILED: 'text-neg bg-neg/10 border-neg/30',
 };
@@ -20,6 +21,7 @@ const STATUS_COPY: Record<RfqStatus, string> = {
   REVEALING: 'Revealing',
   AWARDED: 'Awarded',
   SETTLED: 'Settled',
+  PARTIALLY_SETTLED: 'Part settled',
   EXPIRED: 'Expired',
   FAILED: 'Reverted',
 };

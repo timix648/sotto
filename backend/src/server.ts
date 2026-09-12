@@ -63,8 +63,7 @@ const engine = new RfqEngine((id, kind, payload) => hcs.write(id, kind, payload)
 // size with no request left to release it against.
 const store = new RfqStore(process.env.RFQ_STORE ?? './data/rfq-book.json');
 const restored = store.load();
-engine.hydrate(restored);
-if (restored.length) console.log(`  restored ${restored.length} request(s) from ${store.path}`);
+engine.hydrate(restored.records);
 
 /**
  * Path B relay. The venue holds the batchKey and assembles; each party signs
@@ -83,6 +82,34 @@ const batchRelay = env.ISSUER_ACCOUNT_ID && env.ISSUER_PRIVATE_KEY
 const settlementIface = new ethers.Interface(SETTLEMENT_ABI);
 const sellerSignatures = new Map<string, Map<string, string>>();
 const settledFillNonces = new Map<string, Set<string>>();
+
+// These belong to the same snapshot as the book. Without them a restart came
+// back believing no fill had settled, for trades whose nonces were already
+// consumed on-chain - so the portal would offer to settle them again, and a
+// later revert could not tell a partial failure from a total one.
+for (const [id, byNonce] of Object.entries(restored.sellerSignatures)) {
+  sellerSignatures.set(id, new Map(Object.entries(byNonce)));
+}
+for (const [id, nonces] of Object.entries(restored.settledFillNonces)) {
+  settledFillNonces.set(id, new Set(nonces));
+}
+if (restored.records.length) {
+  console.log(
+    `  restored ${restored.records.length} request(s) from ${store.path}`
+    + ` (${settledFillNonces.size} with settled fills)`
+  );
+}
+
+/** Maps and Sets do not survive JSON; flatten them the way the store expects. */
+const snapshot = () => ({
+  records: engine.dump(),
+  sellerSignatures: Object.fromEntries(
+    [...sellerSignatures].map(([id, m]) => [id, Object.fromEntries(m)])
+  ),
+  settledFillNonces: Object.fromEntries(
+    [...settledFillNonces].map(([id, set]) => [id, [...set]])
+  ),
+});
 
 // ---------------------------------------------------------------- websocket
 const sockets = new Set<{ send: (s: string) => void; rfqId?: string }>();
@@ -108,7 +135,7 @@ app.options('/*', async (_req, reply) => reply.send());
 // than a call in each handler, so a route added later cannot forget to persist.
 // Reads are untouched; only POSTs mutate.
 app.addHook('onResponse', async (req) => {
-  if (req.method === 'POST') store.save(engine.dump());
+  if (req.method === 'POST') store.save(snapshot());
 });
 
 // Map engine errors onto section 3.6's envelope.
@@ -413,7 +440,8 @@ app.post('/api/rfq/:id/settle-batch', async (req) => {
     // blob used to reach the settlement view verbatim: five lines of logsBloom
     // with the one useful fact nowhere in it. Decode it where the ABI is known.
     const { code, message, raw } = explainRevert(e);
-    const rfq = await engine.markReverted(id, message, { code, raw });
+    const rfq = await engine.markReverted(id, message, { code, raw },
+      (settledFillNonces.get(id) ?? new Set()).size);
     broadcast({ type: 'reverted', rfqId: id, reason: message }, id);
     pushRfq(rfq);
     return { status: 'FAILED', path: 'B', reason: message, reasonCode: code };
@@ -466,7 +494,8 @@ app.post('/api/rfq/:id/settle', async (req) => {
     // blob used to reach the settlement view verbatim: five lines of logsBloom
     // with the one useful fact nowhere in it. Decode it where the ABI is known.
     const { code, message, raw } = explainRevert(e);
-    const rfq = await engine.markReverted(id, message, { code, raw });
+    const rfq = await engine.markReverted(id, message, { code, raw },
+      (settledFillNonces.get(id) ?? new Set()).size);
     broadcast({ type: 'reverted', rfqId: id, reason: message }, id);
     pushRfq(rfq);
     return { status: 'FAILED', reason: message, reasonCode: code };

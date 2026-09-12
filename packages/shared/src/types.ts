@@ -1,7 +1,15 @@
 // Wire contract - BLUEPRINT.md section 3.1. FROZEN.
 // Do not change without telling BOTH agents (runbook Part 6).
 
-export type RfqStatus = 'OPEN' | 'REVEALING' | 'AWARDED' | 'SETTLED' | 'EXPIRED' | 'FAILED';
+/**
+ * PARTIALLY_SETTLED is not a nicety. A block filled across several dealers
+ * settles as several transactions, and one of them reverting says nothing
+ * about the others - a request where 4 of 7 units moved was being labelled
+ * FAILED while the cash and the securities for that fill sat on-chain, done.
+ * FAILED now means what it says: nothing settled.
+ */
+export type RfqStatus =
+  | 'OPEN' | 'REVEALING' | 'AWARDED' | 'SETTLED' | 'PARTIALLY_SETTLED' | 'EXPIRED' | 'FAILED';
 
 export interface Rfq {
   id: string;                    // uuid

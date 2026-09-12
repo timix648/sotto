@@ -457,11 +457,22 @@ export class RfqEngine {
   async markReverted(
     id: string,
     reason: string,
-    detail: { code?: string; raw?: string } = {}
+    detail: { code?: string; raw?: string } = {},
+    /**
+     * How many of this request's fills have already settled on-chain.
+     *
+     * A block filled across several dealers settles as several transactions,
+     * and one reverting says nothing about the others. This used to set FAILED
+     * regardless: a request where 4 of 7 units had moved - cash and securities
+     * both, nonces consumed, irreversible - was labelled Reverted, next to a
+     * ledger panel correctly showing the units gone. FAILED now means nothing
+     * settled, which is the only thing it can honestly mean.
+     */
+    settledCount = 0
   ): Promise<Rfq> {
     const r = this.get(id);
-    r.audit.push(await this.audit(id, 'SETTLEMENT_REVERTED', { reason, ...detail }));
-    r.rfq.status = 'FAILED';
+    r.audit.push(await this.audit(id, 'SETTLEMENT_REVERTED', { reason, ...detail, settledCount }));
+    r.rfq.status = settledCount > 0 ? 'PARTIALLY_SETTLED' : 'FAILED';
     return r.rfq;
   }
 }
