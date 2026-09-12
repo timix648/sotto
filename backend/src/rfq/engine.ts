@@ -449,9 +449,18 @@ export class RfqEngine {
     return r.rfq;
   }
 
-  async markReverted(id: string, reason: string): Promise<Rfq> {
+  /**
+   * `reason` is the sentence a person reads. `detail` carries the machine
+   * code and the provider's own text - the audit trail should lose nothing,
+   * but a panel should not be where anyone meets a logsBloom.
+   */
+  async markReverted(
+    id: string,
+    reason: string,
+    detail: { code?: string; raw?: string } = {}
+  ): Promise<Rfq> {
     const r = this.get(id);
-    r.audit.push(await this.audit(id, 'SETTLEMENT_REVERTED', { reason }));
+    r.audit.push(await this.audit(id, 'SETTLEMENT_REVERTED', { reason, ...detail }));
     r.rfq.status = 'FAILED';
     return r.rfq;
   }

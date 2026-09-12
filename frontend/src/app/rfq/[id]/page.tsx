@@ -177,13 +177,20 @@ export default function RfqPage({ params }: { params: Promise<{ id: string }> })
         }}
       />
 
+      {/*
+        The title used to be the reason, and the body always explained a
+        compliance refusal. Most reverts are not that: a lapsed firmness
+        deadline never reaches the delivery call at all, so the page was
+        confidently naming the wrong cause under a wall of logsBloom. The venue
+        decodes the custom error now and sends one sentence; this just shows it,
+        and says the atomicity part without claiming to know which guard fired.
+      */}
       {outcome === 'reverted' && (
-        <Callout tone="neg" title={reason ? `Reverted — ${reason}` : 'Settlement reverted'}>
-          {reasonCopy ?? 'The settlement transaction reverted.'} The cash leg and the security leg
-          are the same transaction: ATS runs compliance inside{' '}
-          <span className="font-mono">executeHoldByPartition</span>, and when it refuses, the{' '}
-          <span className="font-mono">transferFrom</span> that ran a line earlier is rolled back
-          with it. This is the difference between a settlement system and a token transfer.
+        <Callout tone="neg" title="Settlement reverted — nothing moved">
+          {reasonCopy ?? 'The settlement transaction reverted.'}{' '}
+          Both legs live in one transaction, so a failure at any point returns the cash and
+          leaves the security in escrow. That is the difference between a settlement system and
+          a token transfer.
         </Callout>
       )}
 

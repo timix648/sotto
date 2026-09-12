@@ -12,6 +12,7 @@ import { RfqEngine, RfqError } from './rfq/engine.js';
 import { RfqStore } from './rfq/store.js';
 import { Chain, PARTITION_DEFAULT, BOND_ABI as ISSUE_ABI, SETTLEMENT_ABI } from './chain/index.js';
 import { BatchRelay } from './chain/batch.js';
+import { explainRevert } from './chain/revert.js';
 import { eip712Domain, TRADE_TYPES } from '../../packages/shared/src/eip712.js';
 import type { WsFrame, Rfq, Trade } from '../../packages/shared/src/types.js';
 
@@ -407,11 +408,15 @@ app.post('/api/rfq/:id/settle-batch', async (req) => {
       settledFillNonces: [...completed],
     };
   } catch (e) {
-    const reason = e instanceof Error ? e.message.split('\n')[0] : String(e);
-    const rfq = await engine.markReverted(id, reason);
-    broadcast({ type: 'reverted', rfqId: id, reason }, id);
+    // A custom error is four bytes, and ethers - with no ABI to match it
+    // against - reports CALL_EXCEPTION and attaches the entire receipt. That
+    // blob used to reach the settlement view verbatim: five lines of logsBloom
+    // with the one useful fact nowhere in it. Decode it where the ABI is known.
+    const { code, message, raw } = explainRevert(e);
+    const rfq = await engine.markReverted(id, message, { code, raw });
+    broadcast({ type: 'reverted', rfqId: id, reason: message }, id);
     pushRfq(rfq);
-    return { status: 'FAILED', path: 'B', reason };
+    return { status: 'FAILED', path: 'B', reason: message, reasonCode: code };
   }
 });
 
@@ -456,11 +461,15 @@ app.post('/api/rfq/:id/settle', async (req) => {
       settledFillNonces: [...completed],
     };
   } catch (e) {
-    const reason = e instanceof Error ? e.message.split('\n')[0] : String(e);
-    const rfq = await engine.markReverted(id, reason);
-    broadcast({ type: 'reverted', rfqId: id, reason }, id);
+    // A custom error is four bytes, and ethers - with no ABI to match it
+    // against - reports CALL_EXCEPTION and attaches the entire receipt. That
+    // blob used to reach the settlement view verbatim: five lines of logsBloom
+    // with the one useful fact nowhere in it. Decode it where the ABI is known.
+    const { code, message, raw } = explainRevert(e);
+    const rfq = await engine.markReverted(id, message, { code, raw });
+    broadcast({ type: 'reverted', rfqId: id, reason: message }, id);
     pushRfq(rfq);
-    return { status: 'FAILED', reason };
+    return { status: 'FAILED', reason: message, reasonCode: code };
   }
 });
 

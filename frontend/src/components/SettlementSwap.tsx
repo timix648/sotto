@@ -125,7 +125,7 @@ export function SettlementSwap({
             {settled
               ? 'There is no window in which the buyer holds the security and the seller has not been paid. The hold released straight to the awarded address and the cash moved in the same call.'
               : reverted
-                ? 'The delivery was refused, so the payment that ran a line earlier was rolled back with it. This is the difference between a settlement system and a token transfer.'
+                ? 'Neither leg moved. Both are one transaction, so whichever guard refused, the cash returns and the security stays escrowed. This is the difference between a settlement system and a token transfer.'
                 : 'The cash leg and the security leg are the same transaction. Any failure reverts both.'}
           </p>
           <span className="flex shrink-0 items-center gap-3">

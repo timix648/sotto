@@ -573,7 +573,14 @@ function RevealPanel({
         nonce: sealed.nonce,
         quantity: sealed.quantity,
         minQuantity: sealed.minQuantity ?? '1',
-        firmnessSecs: 300,
+        // The engine's own default, and the one the README documents. The
+        // browser used to send 300 - five minutes to cover the seller closing
+        // the window, awarding, and signing two trades in one wallet, then this
+        // dealer approving cash and signing settlement in another. It lapsed
+        // mid-run and reverted on-chain with DeadlineExpired, which is the guard
+        // working correctly on a number no human could meet. Firmness is the
+        // dealer's own exposure, so thirty minutes is theirs to give.
+        firmnessSecs: 1800,
       });
       store.markRevealed(rfq.id, dealer);
       qc.invalidateQueries({ queryKey: qk.rfq(rfq.id) });
